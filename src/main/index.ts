@@ -1,8 +1,9 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, net, safeStorage } from 'electron';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { WorkbenchStore } from './database';
 import { polish } from './polish';
+import { runIntegration } from './integrations';
 
 let store: WorkbenchStore;
 let window: BrowserWindow | null = null;
@@ -45,6 +46,15 @@ else {
     ipcMain.handle('workbench:polish', (event, payload: unknown) => {
       checkSender(event);
       return polish(payload);
+    });
+    const activeIntegrations = new Set<string>();
+    ipcMain.handle('workbench:integration', async (event, payload: unknown) => {
+      checkSender(event);
+      const id = String((payload as { id?: unknown })?.id || '');
+      if (activeIntegrations.has(id)) throw new Error('此连接器正在处理请求，请稍候');
+      activeIntegrations.add(id);
+      try { return await runIntegration(payload, { fetch: net.fetch.bind(net) }); }
+      finally { activeIntegrations.delete(id); }
     });
     window = new BrowserWindow({
       width: 1440, height: 960, minWidth: 900, minHeight: 640,

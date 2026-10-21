@@ -3,12 +3,34 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 
 const root = resolve(import.meta.dirname, '..');
 const evidence = resolve(root, '.desktop-test');
 mkdirSync(evidence, { recursive: true });
 const dataDirectory = process.env.XIAOYU_TEST_DATA_DIR || mkdtempSync(join(evidence, 'profile-'));
 const errors = [];
+const calendarStart = new Date();
+calendarStart.setDate(calendarStart.getDate() + 1);
+const calendarEnd = new Date(calendarStart.getTime() + 3600000);
+const calendarDate = value => value.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+const calendarServer = createServer((request, response) => {
+  if (request.url.startsWith('/invalid')) {
+    response.end('<html>Login required</html>');
+    return;
+  }
+  response.setHeader('Content-Type', 'text/calendar');
+  response.end([
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:desktop-integration-qa',
+    `DTSTART:${calendarDate(calendarStart)}`, `DTEND:${calendarDate(calendarEnd)}`,
+    'SUMMARY:连接器日历验收', 'DESCRIPTION:真实网络请求导入原文', 'END:VEVENT', 'END:VCALENDAR'
+  ].join('\r\n'));
+});
+calendarServer.listen(0, '127.0.0.1');
+await once(calendarServer, 'listening');
+const calendarPort = calendarServer.address().port;
+const calendarUrl = `http://127.0.0.1:${calendarPort}/feed?token=qa-subscription-secret`;
 const executablePath = process.env.XIAOYU_TEST_EXE ||
   resolve(root, 'node_modules/electron/dist/electron.exe');
 const { ELECTRON_RUN_AS_NODE, ...electronEnvironment } = process.env;
@@ -113,6 +135,42 @@ try {
   await page.locator('.project-register').scrollIntoViewIfNeeded();
   await finishAnimations(page);
   await page.screenshot({ path: join(evidence, 'desktop-projects.png'), scale: 'css' });
+  await page.locator('[data-action="nav"][data-view="data"]').click();
+  for (const id of ['feishu', 'dingtalk', 'wecom', 'mail', 'ics']) {
+    await page.locator(`.connector-card[data-id="${id}"]`).click();
+    assert.equal(await page.locator('.integration-modal').count(), 1);
+    await page.locator('.integration-modal [data-action="close-modal"]').click();
+  }
+  assert.match(await page.locator('.connector-card[data-id="feishu"]').innerText(), /未配置/);
+  await page.locator('.connector-card[data-id="ics"]').click();
+  await page.locator('#integration-url').fill(`http://127.0.0.1:${calendarPort}/invalid?token=qa-subscription-secret`);
+  await page.locator('[data-action="connector-test"]').click();
+  await page.waitForFunction(() => DB.integrationState.ics?.status === 'error');
+  assert.match(await page.locator('#integration-result').innerText(), /ICS/);
+  assert.equal(await page.evaluate(() => integrationStatus('ics').on), false);
+  await page.locator('#integration-url').fill(calendarUrl);
+  await page.locator('[data-action="connector-test"]').click();
+  await page.waitForFunction(() => DB.integrationState.ics?.status === 'verified');
+  const inboxBeforeSync = await page.evaluate(() => DB.inbox.length);
+  await page.locator('[data-action="connector-sync"]').click();
+  await page.waitForFunction(() => DB.inbox.some(item => item.title === '连接器日历验收'));
+  await page.waitForFunction(() => !state.integrationBusy.ics);
+  await page.locator('[data-action="connector-sync"]').click();
+  await page.waitForFunction(() => DB.integrationLogs.filter(log => log.connectorId === 'ics' && log.action === 'sync').length === 2);
+  assert.equal(await page.evaluate(() => DB.inbox.length), inboxBeforeSync + 1);
+  await finishAnimations(page);
+  await page.screenshot({ path: join(evidence, 'desktop-integration-ics.png'), scale: 'css' });
+  await page.locator('.integration-modal [data-action="close-modal"]').click();
+  await page.locator('.connector-card[data-id="dingtalk"]').click();
+  await page.locator('#integration-appKey').fill('qa-dingtalk-app');
+  await page.locator('#integration-appSecret').fill('qa-integration-secret');
+  await page.locator('[data-action="connector-save"]').click();
+  await page.waitForFunction(() => DB.settings.integrations.dingtalk?.appSecret === 'qa-integration-secret');
+  await page.locator('.integration-modal [data-action="close-modal"]').click();
+  await page.locator('[data-action="connector-logs"]').click();
+  assert.match(await page.locator('.integration-log-list').innerText(), /ICS|日历/);
+  assert.equal((await page.locator('.integration-log-list').innerText()).includes('qa-subscription-secret'), false);
+  await page.locator('[aria-label="同步日志"] [data-action="close-modal"]').click();
   await page.evaluate(() => {
     DB.meta.closeFlushMarker = 'saved-on-close';
     DB.settings.deepseekKey = 'qa-test-secret-key';
@@ -131,12 +189,16 @@ try {
     secretRecovered: DB.settings.deepseekKey === 'qa-test-secret-key',
     projectRemoved: !DB.projects.some(p => p.name === '桌面项目验收已编辑') && !projectById('p1'),
     taskPreserved: DB.tasks.must.find(t => t.title === '项目关联验收任务')?.project === null,
-    archives: DB.projectArchive.length
+    archives: DB.projectArchive.length,
+    calendarVerified: DB.integrationState.ics?.status === 'verified',
+    connectorSecret: DB.settings.integrations.dingtalk?.appSecret === 'qa-integration-secret',
+    calendarImported: DB.inbox.filter(item => item.title === '连接器日历验收').length
   }));
   assert.deepEqual(recovered, {
-    done: true, confirmed: true, sources: 3, inbox: inboxBefore - 1,
+    done: true, confirmed: true, sources: 3, inbox: inboxBefore,
     closeFlush: 'saved-on-close', secretRecovered: true,
-    projectRemoved: true, taskPreserved: true, archives: 2
+    projectRemoved: true, taskPreserved: true, archives: 2,
+    calendarVerified: true, connectorSecret: true, calendarImported: 1
   });
   const database = new DatabaseSync(join(dataDirectory, 'workbench.sqlite'), { readOnly: true });
   try {
@@ -145,8 +207,20 @@ try {
     assert.equal(database.prepare('SELECT done FROM tasks WHERE id = ?').get(taskId).done, 1);
   } finally { database.close(); }
   for (const file of ['workbench.sqlite', 'workbench.sqlite-wal']) {
-    assert.equal(readFileSync(join(dataDirectory, file)).includes(Buffer.from('qa-test-secret-key')), false);
+    for (const secret of ['qa-test-secret-key', 'qa-integration-secret', 'qa-subscription-secret']) {
+      assert.equal(readFileSync(join(dataDirectory, file)).includes(Buffer.from(secret)), false);
+    }
   }
+  await page.locator('[data-action="nav"][data-view="data"]').click();
+  await page.locator('.connector-card[data-id="dingtalk"]').click();
+  assert.equal(await page.locator('#integration-appSecret').inputValue(), '');
+  assert.match(await page.locator('#integration-appSecret').getAttribute('placeholder'), /已保存/);
+  await page.locator('[data-action="connector-disconnect"]').click();
+  await page.waitForFunction(() => !DB.settings.integrations.dingtalk);
+  await page.evaluate(() => persistWorkbench());
+  assert.equal(await page.evaluate(async () => !!(await window.xiaoyuDesktop.load()).db.settings.integrations.dingtalk), false);
+  await finishAnimations(page);
+  await page.screenshot({ path: join(evidence, 'desktop-integrations.png'), scale: 'css' });
   await finishAnimations(page);
   await page.screenshot({ path: join(evidence, 'desktop-after-restart.png'), scale: 'css' });
   assert.deepEqual(errors, []);
@@ -162,4 +236,6 @@ try {
   throw error;
 } finally {
   await application?.close().catch(() => {});
+  calendarServer.closeAllConnections();
+  calendarServer.close();
 }

@@ -18,7 +18,7 @@ function workbench() {
     scrollChatToBottom: () => {},
     persistWorkbench: async () => { saved.push(runInContext('JSON.stringify(DB)', context)); }
   });
-  for (const file of ['data.js', 'shared.js', 'views-chat.js', 'views-project.js', 'operations.js']) {
+  for (const file of ['data.js', 'shared.js', 'views-chat.js', 'views-project.js', 'operations.js', 'integrations.js']) {
     runInContext(readFileSync(resolve('prototype', file), 'utf8'), context, { filename: file });
   }
   return {
@@ -116,4 +116,23 @@ test('new projects match by name and deleted project drafts cannot modify work',
   w.run("DB.projects = DB.projects.filter(p => p.id !== 'custom')");
   await w.run('applyChatAction()');
   assert.equal(w.run('allWorkbenchTasks().length'), before);
+});
+
+test('old prototype connections do not appear as verified without saved credentials', () => {
+  const w = workbench();
+  w.run('initializeIntegrations()');
+  assert.equal(w.run("integrationStatus('feishu').on"), false);
+  assert.equal(w.run("integrationStatus('ics').label"), '未配置');
+  assert.equal(w.run("integrationStatus('manual').on"), true);
+  assert.equal(w.run("integrationStatus('github').label"), '尚未接入');
+});
+
+test('connector imports deduplicate pending and already-confirmed inbox records', () => {
+  const w = workbench();
+  w.run('initializeIntegrations()');
+  assert.equal(w.run("importIntegrationRecords('ics', [{ externalId: 'event-1', title: '会议', raw: '原始日程' }])"), 1);
+  assert.equal(w.run("importIntegrationRecords('ics', [{ externalId: 'event-1', title: '会议', raw: '原始日程' }])"), 0);
+  w.run("DB.inboxArchive = [DB.inbox.shift()]");
+  assert.equal(w.run("importIntegrationRecords('ics', [{ externalId: 'event-1', title: '会议', raw: '原始日程' }])"), 0);
+  assert.equal(w.run('DB.inboxArchive[0].raw'), '原始日程');
 });

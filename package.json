@@ -1,6 +1,6 @@
 {
   "name": "xiaoyu-workbench",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Xiaoyu personal workbench",
   "main": "./out/main/index.js",
@@ -22,6 +22,9 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "imapflow": "^2.5.9",
+    "node-ical": "^0.27.3",
+    "postal-mime": "^4.0.11",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "zod": "^4.1.0"

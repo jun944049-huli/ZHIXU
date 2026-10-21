@@ -35,6 +35,13 @@ try {
   await page.reload();
   await page.waitForFunction(() => typeof workbenchReady !== 'undefined' && workbenchReady);
   assert.equal(await page.evaluate(id => !!projectById(id), projectId), false);
+  await page.locator('[data-action="nav"][data-view="data"]').click();
+  for (const id of ['feishu', 'dingtalk', 'wecom', 'mail', 'ics']) {
+    await page.locator(`.connector-card[data-id="${id}"]`).click();
+    assert.equal(await page.locator('[data-action="connector-save"]').isDisabled(), true);
+    assert.match(await page.locator('.integration-notice').innerText(), /桌面测试版/);
+    await page.locator('.integration-modal [data-action="close-modal"]').click();
+  }
   await page.locator('[data-action="nav"][data-view="projects"]').first().click();
   await page.locator('.project-register').scrollIntoViewIfNeeded();
   await finishAnimations();
@@ -52,6 +59,13 @@ try {
   const modal = await page.locator('.project-editor').boundingBox();
   assert.ok(modal.x >= 0 && modal.x + modal.width <= 391);
   await page.screenshot({ path: resolve(evidence, 'browser-project-mobile-modal.png') });
+  await page.locator('.project-editor [data-action="close-modal"]').first().click();
+  await page.locator('[data-action="nav"][data-view="data"]').click();
+  await page.locator('.connector-card[data-id="mail"]').click();
+  await finishAnimations();
+  const integrationModal = await page.locator('.integration-modal').boundingBox();
+  assert.ok(integrationModal.x >= 0 && integrationModal.x + integrationModal.width <= 391);
+  await page.screenshot({ path: resolve(evidence, 'browser-integration-mobile.png') });
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: true, projectId, overflow }));
 } finally {

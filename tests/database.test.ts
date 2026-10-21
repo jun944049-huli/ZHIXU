@@ -21,7 +21,10 @@ function fixture(): WorkbenchSnapshot {
         should: [], could: []
       },
       inbox: [{ id: 'i1', title: '待确认消息' }],
-      settings: { assistantName: '小鱼', deepseekKey: 'test-secret-key' }
+      settings: {
+        assistantName: '小鱼', deepseekKey: 'test-secret-key',
+        integrations: { mail: { password: 'private-imap-password' }, ics: { url: 'https://example.com/private-feed' } }
+      }
     },
     preferences: { 'jw-settings': '{"deepseekKey":"test-secret-key"}' }
   };
@@ -45,6 +48,10 @@ test('completed tasks, original settings and inbox survive a database reopen', (
     const disk = readFileSync(path).toString();
     assert.equal(disk.includes('test-secret-key'), false);
     assert.equal(readFileSync(path + '-wal').toString().includes('test-secret-key'), false);
+    for (const secret of ['private-imap-password', 'private-feed']) {
+      assert.equal(disk.includes(secret), false);
+      assert.equal(readFileSync(path + '-wal').toString().includes(secret), false);
+    }
   });
 });
 

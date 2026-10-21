@@ -78,6 +78,27 @@ function handleClick(e) {
   }
 
   switch (action) {
+    case 'connector-config':
+      openIntegration(el.dataset.id);
+      break;
+    case 'connector-add':
+      openIntegrationPicker();
+      break;
+    case 'connector-save':
+      saveIntegration();
+      break;
+    case 'connector-test':
+      executeIntegration('test');
+      break;
+    case 'connector-sync':
+      executeIntegration('sync');
+      break;
+    case 'connector-disconnect':
+      disconnectIntegration();
+      break;
+    case 'connector-logs':
+      openIntegrationLogs();
+      break;
     case 'new-project':
       openProjectEditor();
       break;
@@ -461,6 +482,7 @@ async function boot() {
   }
   state.reportDate = DB.meta.today;
   loadLocalOverrides();
+  initializeIntegrations();
   updateTaskCapacity();
   try {
     const params = new URLSearchParams(location.search);

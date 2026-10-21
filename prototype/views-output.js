@@ -600,26 +600,28 @@ function renderData() {
     { id: 'plugin', title: '插件与扩展', icon: 'zap', sub: '把捕获入口放到你已经在用的地方。' }
   ];
 
-  const connectorCard = c => `
-    <button class="connector-card" data-action="toast" data-msg="${c.status === 'on' ? '打开连接器配置（演示）' : '开始配置 ' + c.name}">
+  const connectorCard = c => {
+    const status = integrationStatus(c.id);
+    return `
+    <button class="connector-card" data-action="connector-config" data-id="${c.id}" aria-label="${esc(c.name)}连接配置">
       <div class="connector-top">
         <span class="connector-mark" style="background:${c.color}">${esc(c.mark)}</span>
         <div>
           <div class="connector-name">${esc(c.name)}</div>
-          <div class="connector-meta">${esc(c.meta)}</div>
+          <div class="connector-meta">${esc(status.meta)}</div>
         </div>
-        <span class="connector-status ${c.status}"></span>
+        <span class="connector-status ${status.on ? 'on' : 'off'}"></span>
       </div>
       <div class="connector-foot">
-        <span>${c.status === 'on' ? '已连接' : '未连接'}</span>
-        <span class="link">${c.status === 'on' ? '配置' : '连接'}</span>
+        <span>${esc(status.label)}</span>
+        <span class="link">${c.id === 'manual' ? '打开' : INTEGRATIONS[c.id] ? '配置' : '待开发'}</span>
       </div>
     </button>
-  `;
+  `; };
 
   const connectorSections = connectorGroups.map(g => {
     const items = DB.connectors.filter(c => c.group === g.id);
-    const connected = items.filter(c => c.status === 'on').length;
+    const connected = items.filter(c => integrationStatus(c.id).on).length;
     return `
       <div class="connector-section">
         <div class="connector-section-head">
@@ -627,7 +629,7 @@ function renderData() {
             <h3>${icon(g.icon, 14)} ${g.title}</h3>
             <p>${g.sub}</p>
           </div>
-          <span class="tiny muted">${connected} / ${items.length} 已连接</span>
+          <span class="tiny muted">${connected} / ${items.length} 已验证或可用</span>
         </div>
         <div class="connector-grid">${items.map(connectorCard).join('')}</div>
       </div>
@@ -658,21 +660,21 @@ function renderData() {
       <div>
         <div class="eyebrow">Data · 可扩展的数据层</div>
         <h1>数据与集成</h1>
-        <p class="sub">没有的字段可以加，没有的系统可以接。原始数据永远保留，随时可导出。</p>
+        <p class="sub">管理外部来源、连接配置与手动同步记录。</p>
       </div>
       <div class="head-actions">
         <span class="data-head-badge">${icon('shield', 12)} 本地存储</span>
-        <button class="btn btn-primary" data-action="toast" data-msg="新增连接器（演示）">${icon('plus', 14)} 新增连接器</button>
+        <button class="btn btn-primary" data-action="connector-add">${icon('plus', 14)} 配置连接器</button>
       </div>
     </div>
 
     <div class="section-title-row" style="margin-top:0">
       <div>
         <h2>连接器</h2>
-        <p class="sub">5 个已连接 · 10 个可扩展。按「内容 / 工作 / 插件」分组，复杂自动化交给外部 n8n。</p>
+        <p class="sub">${DB.connectors.filter(c => integrationStatus(c.id).on).length} 个已验证或可用 · ${Object.keys(INTEGRATIONS).length} 类可配置。外部记录同步后进入收件箱。</p>
       </div>
       <div class="actions">
-        <button class="btn btn-sm btn-ghost" data-action="toast" data-msg="查看同步日志（演示）">${icon('refresh', 12)} 同步日志</button>
+        <button class="btn btn-sm btn-ghost" data-action="connector-logs">${icon('refresh', 12)} 同步日志</button>
       </div>
     </div>
 

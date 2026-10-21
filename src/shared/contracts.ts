@@ -18,6 +18,25 @@ export const snapshotSchema = z.object({
 
 export type WorkbenchSnapshot = z.infer<typeof snapshotSchema>;
 
+export const integrationSchema = z.object({
+  id: z.enum(['feishu', 'dingtalk', 'wecom', 'mail', 'ics']),
+  operation: z.enum(['test', 'sync']),
+  config: z.record(z.string().max(40), z.string().max(4096))
+});
+
+export interface IntegrationRecord {
+  externalId: string;
+  title: string;
+  raw: string;
+  date?: string;
+}
+
+export interface IntegrationResult {
+  mode: 'read' | 'auth';
+  message: string;
+  records: IntegrationRecord[];
+}
+
 export const polishSchema = z.object({
   text: z.string().trim().min(1).max(12000),
   tone: z.enum(['简洁', '正式', '有说服力', '温和']).default('简洁'),
@@ -31,4 +50,5 @@ export interface DesktopAPI {
   load(): Promise<WorkbenchSnapshot | null>;
   save(snapshot: WorkbenchSnapshot): Promise<void>;
   polish(payload: unknown): Promise<{ text: string; model: string; provider: string }>;
+  integration(payload: unknown): Promise<IntegrationResult>;
 }

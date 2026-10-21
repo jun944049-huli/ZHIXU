@@ -1257,6 +1257,19 @@ h3 { font-size: 13px; font-weight: 650; }
 .project-editor .modal-head { justify-content: space-between; }
 .project-editor .modal-body { display: block; }
 .project-editor .modal-body.form-grid { display: grid; }
+.integration-fields { display: grid; gap: 14px; margin-top: 18px; }
+.integration-modal .modal-head h2 { overflow-wrap: anywhere; }
+.integration-actions { flex-wrap: wrap; }
+.integration-actions .btn { min-height: 34px; }
+.integration-result, .integration-notice {
+  margin-top: 16px; padding: 10px 12px; background: var(--surface-2);
+  border-left: 3px solid var(--accent); font-size: 12px; overflow-wrap: anywhere;
+}
+.integration-choices { display: grid; gap: 12px; }
+.integration-log { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.integration-log > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.integration-log time { margin-left: auto; font-size: 11px; color: var(--ink-3); }
+.integration-log p { margin-top: 6px; font-size: 12px; overflow-wrap: anywhere; }
 .project-card {
   position: relative;
   display: block;
