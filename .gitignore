@@ -1,0 +1,17 @@
+node_modules/
+out/
+release/
+.desktop-test/
+desktop-public/
+*.log
+.playwright-mcp/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+reference-last-request.png
