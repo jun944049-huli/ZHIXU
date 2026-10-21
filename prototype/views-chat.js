@@ -2,7 +2,8 @@
 
 function ensureChat() {
   if (!state.chatMessages) {
-    state.chatMessages = JSON.parse(JSON.stringify(DB.chat.messages));
+    state.chatMessages = [{ role: 'assistant', time: '现在', model: '本地指令',
+      text: '告诉我要安排的任务、项目进度或风险。写入前会提供待确认的草稿。' }];
   }
 }
 
@@ -158,13 +159,6 @@ function renderChat() {
   ensureChat();
   ensureChatShortcuts();
   const contexts = [{ id: 'auto', name: '自动匹配' }].concat(DB.projects.map(p => ({ id: p.id, name: p.name })));
-  const provider = aiProviderConfig();
-  const models = ['DeepSeek', 'OpenAI', 'Ollama'];
-  if (provider.id === 'custom' && provider.name && !models.includes(provider.name)) models.unshift(provider.name);
-  const selectedModel = models.includes(state.chatModel)
-    ? state.chatModel
-    : (provider.id === 'custom' && models.includes(provider.name) ? provider.name : 'DeepSeek');
-
   return `
     <div class="page-head chat-page-head">
       <div>
@@ -189,15 +183,13 @@ function renderChat() {
           <div class="composer-box">
             <textarea id="chat-input" rows="2" placeholder="直接说：把星火项目进展更新到 80%，测试库风险升到高……"></textarea>
             <div class="composer-bar">
-              <button class="icon-btn sm" data-action="toast" data-msg="添加附件（演示）" aria-label="添加附件">${icon('plus', 14)}</button>
+              <button class="icon-btn sm" data-action="chat-attachment" title="添加文本附件" aria-label="添加文本附件">${icon('plus', 14)}</button>
               <select class="chat-select" id="chat-context" aria-label="参考范围">
                 ${contexts.map(c => `<option value="${c.id}" ${state.chatContext === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
               </select>
               <button class="composer-tool" data-action="open-polish" title="润色输入内容">${icon('sparkles', 13)} 润色</button>
               <span class="composer-spacer"></span>
-              <select class="chat-select chat-model-select" id="chat-model" aria-label="模型">
-                ${models.map(m => `<option value="${m}" ${selectedModel === m ? 'selected' : ''}>${m}</option>`).join('')}
-              </select>
+              <span class="small muted">本地指令</span>
               <button class="send-btn" data-action="chat-send" aria-label="发送">${icon('arrowUp', 16)}</button>
             </div>
           </div>
@@ -224,7 +216,7 @@ function renderChat() {
           <div class="panel-head"><h3>${icon('zap', 14)} 可执行操作</h3></div>
           <div class="panel-body">
             <div class="chat-capability"><span>更新任务进度</span><b>需确认</b></div>
-            <div class="chat-capability"><span>新建任务 / 子任务</span><b>需确认</b></div>
+            <div class="chat-capability"><span>新建任务</span><b>需确认</b></div>
             <div class="chat-capability"><span>更新风险等级</span><b>需确认</b></div>
             <div class="chat-capability"><span>内容润色 / 改写</span><b>可预览</b></div>
             <div class="chat-capability"><span>自定义快捷指令</span><b>可编辑</b></div>
@@ -235,8 +227,8 @@ function renderChat() {
         <div class="card chat-safety">
           <div class="panel-body">
             <div class="eyebrow">安全边界</div>
-            <p>AI 只提草稿。写操作必须你确认，且可撤销。</p>
-            <div class="tiny muted mt-8">敏感项目可手动切到 Ollama 本地模型。</div>
+            <p>本地指令生成草稿，确认后才写入。润色使用个人设置中的供应商。</p>
+            <div class="tiny muted mt-8">完整模型对话尚未接入。</div>
           </div>
         </div>
       </aside>
@@ -299,8 +291,8 @@ function refineProjectNoteWithAI(note, raw, projectId, activity) {
     .catch(() => { /* keep the local polish */ });
 }
 
-function autoLogProjectNote(text) {
-  const p = matchProjectByText(text);
+function autoLogProjectNote(text, projectId) {
+  const p = projectId ? projectById(projectId) : matchProjectByText(text);
   if (!p) return null;
   const raw = String(text || '').trim();
   if (!raw) return null;
@@ -341,7 +333,7 @@ function buildChatReply(text) {
   if (wantsReport) {
     return {
       role: 'assistant', time: '现在', model: state.chatModel,
-      text: '可以。我会先汇总本周 18 条事实（完成、进行中、风险、时间记录），再让模型写叙述。每条结论都能回到任务 ID。',
+      text: `本机共有 ${allWorkbenchTasks().length} 条任务记录。报表页可按日期汇总日报、周报和月报。`,
       quick: [
         { label: '打开周报预览', view: 'reports' },
         { label: '只看风险', view: 'reports' }
@@ -352,7 +344,7 @@ function buildChatReply(text) {
   if (wantsCapacity) {
     return {
       role: 'assistant', time: '现在', model: state.chatModel,
-      text: '按今天 6.5h / 7.2h 的承诺，再接一个 2h 任务会到 8.5h，超出 1.3h。会挤掉「整理联调问题」的 1h 缓冲，并让演示准备少半天。\n建议：压缩范围先给结论，或改到明天 10:00。',
+      text: `今日承诺 ${DB.capacity.committed}h / 可用 ${DB.capacity.available}h。再接 2h 后为 ${formatHours(DB.capacity.committed + 2)}。\n可在插单影响中输入实际事项，预览并确认排期。`,
       quick: [
         { label: '打开插单影响', action: 'impact' },
         { label: '查看今日清单', view: 'today' }
@@ -369,8 +361,11 @@ function buildChatReply(text) {
       };
     }
 
-    const target = progress == null ? Math.min(100, p.progress + 8) : progress;
-    const items = [{ label: '匹配项目', value: `${p.name} · ${p.id === 'p1' ? 93 : 88}%` }];
+    if (wantsProgress && progress == null) return {
+      role: 'assistant', time: '现在', model: '本地指令', text: `请提供「${p.name}」的明确进度，例如“进度更新到 50%”。`
+    };
+    const target = progress == null ? p.progress : progress;
+    const items = [{ label: '匹配项目', value: p.name }];
     if (wantsProgress) {
       items.push({
         label: '更新进度',
@@ -383,10 +378,6 @@ function buildChatReply(text) {
         value: p.id === 'p1' ? '测试库开通延迟 · 中 → 高' : '项目风险 · 标记为高'
       });
     }
-    if (/测试库|等/.test(text)) {
-      items.push({ label: '新增等待', value: '运维开通测试库 · 已等 6 天' });
-    }
-
     return {
       role: 'assistant', time: '现在', model: state.chatModel,
       text: `我匹配到「${p.name}」，准备更新 ${items.length - 1} 项。先确认，再写入。`,
@@ -394,7 +385,7 @@ function buildChatReply(text) {
         type: wantsProgress ? 'progress' : 'risk',
         status: 'pending',
         title: `准备更新 · ${p.name}`,
-        projectId: p.id,
+        projectId: p.id, raw: text, updateRisk: wantsRisk,
         progress: target,
         items
       }
@@ -403,25 +394,28 @@ function buildChatReply(text) {
 
   if (wantsTask) {
     const title = deriveChatTaskTitle(text);
-    const due = /今天|17:00|下午/.test(text) ? '今天 17:00' : '待确认';
-    const estimate = /2\s*小时|2h/.test(text) ? '2h / 3h' : '1.5h / 2.5h';
+    const date = text.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] || (/明天/.test(text)
+      ? addDaysISO(DB.meta.today, 1) : /后天/.test(text) ? addDaysISO(DB.meta.today, 2) : DB.meta.today);
+    const due = date;
+    const hours = text.match(/(\d+(?:\.\d+)?)\s*(?:小时|h\b)/i);
+    const estimate = hours ? `${Number(hours[1])}h` : '1h';
     return {
       role: 'assistant', time: '现在', model: state.chatModel,
-      text: '我把它整理成一条任务，先放收件箱；确认后可以加入今天。',
+      text: `已整理为任务草稿，确认后安排到 ${date}。`,
       actionCard: {
         type: 'task',
         status: 'pending',
         title: '准备新建任务',
         projectId: p ? p.id : null,
         taskTitle: title,
-        due,
+        due, date,
         estimate, raw: text,
         items: [
-          { label: '匹配项目', value: p ? `${p.name} · ${p.id === 'p1' ? 93 : 86}%` : '未归属 · 需要你选' },
+          { label: '匹配项目', value: p ? p.name : '未归属' },
           { label: '任务标题', value: title },
           { label: '截止', value: due },
           { label: '预估', value: estimate },
-          { label: '建议', value: p ? '确认后加入今日推进' : '先放收件箱，等归属确认' }
+          { label: '安排日期', value: date }
         ]
       }
     };
@@ -436,7 +430,7 @@ function buildChatReply(text) {
       title: '收件箱草稿',
       projectId: p ? p.id : null, raw: text,
       items: [
-        { label: '匹配项目', value: p ? `${p.name} · 81%` : '未归属 · 待确认' },
+        { label: '匹配项目', value: p ? p.name : '未归属 · 待确认' },
         { label: '原文', value: text.length > 32 ? text.slice(0, 32) + '…' : text },
         { label: '建议', value: '确认后进入收件箱，再决定今天或下周' }
       ]
@@ -456,7 +450,7 @@ function sendChat() {
 
   state.chatMessages.push({ role: 'user', time: '现在', text });
   saveChatHistory();
-  const logged = autoLogProjectNote(text);
+  state.chatModel = '本地指令';
   state.chatSending = true;
   const requestId = ++state.chatRequestId;
   render();
@@ -465,13 +459,6 @@ function sendChat() {
   setTimeout(() => {
     if (state.chatRequestId !== requestId) return;
     const reply = buildChatReply(text);
-    if (logged) {
-      reply.loggedNote = {
-        projectId: logged.project.id,
-        projectName: logged.project.name,
-        text: logged.note.text
-      };
-    }
     state.chatMessages.push(reply);
     saveChatHistory();
     state.chatSending = false;
@@ -499,16 +486,7 @@ async function applyChatAction(mode, cardId) {
   if (card.type === 'progress') {
     const target = card.progress ?? 80;
     if (p) p.progress = target;
-    if (p && p.id === 'p1') {
-      const task = DB.tasks.must.find(t => t.title.includes('联调'));
-      if (task) task.progress = target;
-      if (mode !== 'progress') {
-        const risk = DB.projectDetails.p1?.risks.find(r => r.title.includes('测试库'));
-        if (risk) { risk.level = '高'; risk.score = 16; }
-        const wait = DB.waiting.find(w => w.title.includes('测试库'));
-        if (wait) wait.days = 6;
-      }
-    }
+    if (p && card.updateRisk && mode !== 'progress') raiseProjectRisk(p, card.raw);
     summary = `已更新进度：${p ? p.name : '项目'} → ${target}%`;
   } else if (card.type === 'task') {
     const sourceId = newRecordId('source');
@@ -523,14 +501,13 @@ async function applyChatAction(mode, cardId) {
       priority: 'P1',
       ai: true, sourceId, done: false, createdAt: new Date().toISOString()
     };
-    addConfirmedTask(newTask, DB.meta.today, 'must');
-    summary = `已加入今日推进：${newTask.title}`;
+    addConfirmedTask(newTask, card.date || DB.meta.today, 'must');
+    summary = `已安排到 ${card.date || DB.meta.today}：${newTask.title}`;
   } else if (card.type === 'risk') {
     if (p) {
-      const risk = DB.projectDetails[p.id] && DB.projectDetails[p.id].risks && DB.projectDetails[p.id].risks[0];
-      if (risk) { risk.level = '高'; risk.score = 16; }
+      raiseProjectRisk(p, card.raw);
     }
-    summary = `已把「${p ? p.name : '项目'}」的风险等级提升，并记录应对动作。`;
+    summary = `已把「${p ? p.name : '项目'}」的首条未关闭风险提升为高，请在风险登记册补充应对动作。`;
   } else {
     DB.inbox.unshift({
       id: newRecordId('inbox'), title: card.raw || '来自对话的消息',
@@ -543,6 +520,10 @@ async function applyChatAction(mode, cardId) {
   }
 
   card.status = 'done';
+  if (card.raw && p) {
+    const logged = autoLogProjectNote(card.raw, p.id);
+    if (logged) cardMsg.loggedNote = { projectId: p.id, projectName: p.name, text: logged.note.text };
+  }
   state.chatMessages.push({
     role: 'assistant', time: '现在', model: state.chatModel,
     text: summary + '\n要不要我顺手写进今天的日报？',

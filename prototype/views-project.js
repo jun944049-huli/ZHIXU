@@ -54,7 +54,7 @@ function renderProjects() {
         <p class="sub">${DB.projects.length} 个项目，${attention} 个需要关注。</p>
       </div>
       <div class="head-actions">
-        <button class="btn" data-action="toast" data-msg="导出项目台账（演示）">${icon('download', 14)} 导出台账</button>
+        <button class="btn" data-action="project-export">${icon('download', 14)} 导出台账</button>
         <button class="btn btn-primary" data-action="new-project">${icon('plus', 14)} 新建项目</button>
       </div>
     </div>
@@ -89,16 +89,16 @@ function detailForProject(p) {
   if (DB.projectDetails[p.id]) return DB.projectDetails[p.id];
   return {
     client: '—',
-    period: '2026.10 – 2026.12',
+    period: '未设置',
     team: p.members.length + ' 人',
     healthMetrics: [
       { label: '进度', value: p.progress + '%', sub: '计划 ' + p.planned + '%', trend: (p.progress - p.planned) + '%', tone: p.progress < p.planned ? 'amber' : 'ink' },
       { label: '延期任务', value: '0', sub: '本周', trend: '0', tone: 'ink' },
       { label: '阻塞', value: '0', sub: '平均 0 天', trend: '0', tone: 'ink' },
-      { label: '需求变更', value: '1', sub: '本月累计', trend: '+1', tone: 'ink' }
+      { label: '需求变更', value: '0', sub: '未记录', trend: '', tone: 'ink' }
     ],
     milestones: [
-      { name: p.next, date: p.nextDate, status: p.health === 'red' ? 'risk' : 'open' }
+      { id: `milestone-${p.id}`, name: p.next, date: p.nextDate, status: p.health === 'red' ? 'risk' : 'open' }
     ],
     risks: [],
     activity: [
@@ -135,8 +135,8 @@ function renderProject() {
   const detail = detailForProject(p);
   const liveTasks = allWorkbenchTasks().filter(t => t.project === p.id);
   const projectTasks = liveTasks.map(t => ({
-    ...t, status: t.done ? '已完成' : t.blocked ? '阻塞' : '待开始'
-  })).concat(detail.tasks.filter(t => !liveTasks.some(live => live.title === t.title)));
+    ...t, status: t.done ? '已完成' : t.blocked ? '阻塞' : t.status === '进行中' ? '进行中' : '待开始'
+  }));
   const tab = state.projectTab;
   const notes = projectNotesFor(p.id);
 
@@ -149,7 +149,12 @@ function renderProject() {
     { id: 'docs', label: '文档', count: detail.docs.length }
   ];
 
-  const healthCells = detail.healthMetrics.map(m => `
+  const healthCells = [
+    { label: '进度', value: `${p.progress}%`, sub: `计划 ${p.planned}%`, trend: '', tone: 'ink' },
+    { label: '未完成', value: liveTasks.filter(t => !t.done).length, sub: '包含其他日期', trend: '', tone: 'ink' },
+    { label: '阻塞', value: liveTasks.filter(t => t.blocked && !t.done).length, sub: '未完成任务', trend: '', tone: 'amber' },
+    { label: '风险', value: detail.risks.filter(r => r.status !== 'closed').length, sub: '未关闭', trend: '', tone: 'red' }
+  ].map(m => `
     <div class="health-cell">
       <div class="health-label">${esc(m.label)}</div>
       <div class="health-value">
@@ -168,6 +173,7 @@ function renderProject() {
         ${m.note ? `<div class="ms-note">${esc(m.note)}</div>` : ''}
       </div>
       <span class="ms-date">${esc(m.date)}</span>
+      <button class="icon-btn sm" data-action="record-edit" data-kind="milestone" data-id="${esc(m.id)}" aria-label="编辑里程碑">${icon('edit', 13)}</button>
     </div>
   `).join('');
 
@@ -179,7 +185,8 @@ function renderProject() {
       </td>
       <td><span class="score ${scoreClass(r.level)}">${r.score}</span></td>
       <td><span class="chip ${r.level === '高' ? 'red' : r.level === '中' ? 'amber' : 'green'}">${esc(r.level)}</span></td>
-      <td class="muted">${esc(r.owner)}</td>
+      <td class="muted">${esc(r.owner)} ${r.status === 'closed' ? '<span class="chip green">已关闭</span>' : ''}
+        <button class="icon-btn sm" data-action="record-edit" data-kind="risk" data-id="${esc(r.id)}" aria-label="编辑风险">${icon('edit', 13)}</button></td>
     </tr>
   `).join('');
 
@@ -213,17 +220,19 @@ function renderProject() {
     </div>
   `).join('');
 
-  const totalTime = detail.time.split.reduce((a, s) => a + s.value, 0) || 1;
+  const projectTime = DB.timeEntries.filter(e => e.project === p.id && e.date >= startOfWeekISO(DB.meta.today));
+  const timeSplit = projectTime.length ? [{ label: '专注计时', value: Math.round(projectTime.reduce((sum, e) => sum + e.seconds / 3600, 0) * 10) / 10, color: p.color }] : [];
+  const totalTime = timeSplit.reduce((a, s) => a + s.value, 0) || 1;
   let acc = 0;
-  const stops = detail.time.split.map(s => {
+  const stops = timeSplit.map(s => {
     const start = acc;
     acc += s.value / totalTime * 100;
     return `${s.color} ${start}% ${acc}%`;
   }).join(', ');
-  const donutStyle = detail.time.split.length
+  const donutStyle = timeSplit.length
     ? `background:conic-gradient(${stops})`
     : 'background:var(--surface-3)';
-  const timeLegend = detail.time.split.map(s => `
+  const timeLegend = timeSplit.map(s => `
     <span><i style="background:${s.color}"></i>${esc(s.label)} ${s.value}h</span>
   `).join('');
 
@@ -234,7 +243,7 @@ function renderProject() {
         <div class="doc-title">${esc(d.title)}</div>
         <div class="doc-meta">${esc(d.meta)}</div>
       </div>
-      <button class="icon-btn sm" data-action="toast" data-msg="打开文档（演示）">${icon('arrowRight', 12)}</button>
+      <button class="icon-btn sm" data-action="document-open" data-id="${esc(d.id)}" aria-label="打开文档 ${esc(d.title)}">${icon('arrowRight', 12)}</button>
     </div>
   `).join('');
 
@@ -246,7 +255,7 @@ function renderProject() {
       </td>
       <td><span class="status-pill ${statusClass(t.status)}">${esc(t.status)}</span></td>
       <td><span class="priority ${t.priority.toLowerCase()}">${t.priority}</span></td>
-      <td class="muted">${esc(t.due)}</td>
+      <td class="muted">${esc(t.due)} <button class="icon-btn sm" data-action="task-edit" data-id="${esc(t.id)}" aria-label="编辑任务">${icon('edit', 13)}</button></td>
     </tr>
   `).join('');
 
@@ -296,7 +305,7 @@ function renderProject() {
           </div>
 
           <div class="card">
-            <div class="panel-head"><h3>${icon('pie', 14)} 本周投入</h3><span class="tiny muted">${esc(detail.time.total)}</span></div>
+            <div class="panel-head"><h3>${icon('pie', 14)} 本周计时</h3><span class="tiny muted">${formatHours(projectTime.reduce((sum, e) => sum + e.seconds / 3600, 0))}</span></div>
             <div class="panel-body">
               <div class="donut-wrap">
                 <div class="donut" style="${donutStyle}"></div>
@@ -306,7 +315,7 @@ function renderProject() {
           </div>
 
           <div class="card">
-            <div class="panel-head"><h3>${icon('file', 14)} 最近文档</h3><button class="icon-btn sm" data-action="toast" data-msg="文档库（演示）">${icon('arrowRight', 12)}</button></div>
+            <div class="panel-head"><h3>${icon('file', 14)} 最近文档</h3><button class="icon-btn sm" data-action="project-tab" data-tab="docs" aria-label="项目文档">${icon('arrowRight', 12)}</button></div>
             <div class="doc-list">${docs}</div>
           </div>
         </aside>
@@ -318,29 +327,30 @@ function renderProject() {
         <div class="panel-head">
           <h3>${icon('layout', 15)} 任务 <span class="count-badge">${projectTasks.length}</span></h3>
           <div class="row gap-6">
-            <button class="btn btn-sm" data-action="toast" data-msg="切换看板视图（演示）">${icon('layout', 12)} 看板</button>
+            <button class="btn btn-sm" data-action="project-board">${icon('layout', 12)} ${state.projectBoard ? '列表' : '看板'}</button>
             <button class="btn btn-sm btn-primary" data-action="project-task" data-id="${p.id}">${icon('plus', 12)} 新建</button>
           </div>
         </div>
-        <table class="task-table">
+        ${state.projectBoard ? `<div class="task-board">${['待开始', '进行中', '阻塞', '已完成'].map(status => `<section><h3>${status}</h3>
+          ${projectTasks.filter(t => t.status === status).map(t => `<button class="board-task" data-action="task-edit" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span>${esc(t.priority)} · ${esc(t.estimate)}</span></button>`).join('') || '<p class="small muted">暂无任务</p>'}</section>`).join('')}</div>` : `<div class="table-scroll"><table class="task-table">
           <thead><tr><th>任务</th><th>状态</th><th>优先级</th><th>截止</th></tr></thead>
           <tbody>${taskRows || '<tr><td colspan="4" class="muted">暂无任务</td></tr>'}</tbody>
-        </table>
+        </table></div>`}
       </div>
     `;
   } else if (tab === 'milestones') {
     tabContent = `
       <div class="detail-grid">
         <div class="card">
-          <div class="panel-head"><h3>${icon('flag', 15)} 里程碑</h3><span class="tiny muted">${detail.milestones.length} 个节点</span></div>
+          <div class="panel-head"><h3>${icon('flag', 15)} 里程碑</h3><button class="btn btn-sm" data-action="record-edit" data-kind="milestone">${icon('plus', 12)} 新增节点</button></div>
           <div class="panel-body">${milestones}</div>
         </div>
         <aside class="detail-rail">
           <div class="card card-pad">
             <div class="eyebrow">下一步</div>
-            <h3 class="mt-8">演示环境就绪</h3>
-            <p class="small muted mt-8">这是当前关键路径。它延期 1 天，客户演示就少 1 天缓冲。</p>
-            <button class="btn btn-block mt-12" data-action="toast" data-msg="已把里程碑加入每日简报">${icon('bell', 13)} 加入每日简报</button>
+            <h3 class="mt-8">${esc(p.next)}</h3>
+            <p class="small muted mt-8">${esc(p.nextDate)}</p>
+            <button class="btn btn-block mt-12" data-action="milestone-follow">${icon('bell', 13)} ${p.followMilestones ? '取消简报关注' : '加入本地简报'}</button>
           </div>
         </aside>
       </div>
@@ -350,7 +360,7 @@ function renderProject() {
       <div class="card">
         <div class="panel-head">
           <h3>${icon('alert', 15)} 风险登记册 <span class="count-badge">${detail.risks.length}</span></h3>
-          <button class="btn btn-sm btn-primary" data-action="toast" data-msg="新增风险（演示）">${icon('plus', 12)} 新增风险</button>
+          <button class="btn btn-sm btn-primary" data-action="record-edit" data-kind="risk">${icon('plus', 12)} 新增风险</button>
         </div>
         <table class="risk-table">
           <thead><tr><th>风险</th><th>概率 × 影响</th><th>等级</th><th>负责人</th></tr></thead>
@@ -379,7 +389,7 @@ function renderProject() {
   } else {
     tabContent = `
       <div class="card">
-        <div class="panel-head"><h3>${icon('file', 15)} 文档与产出</h3><button class="btn btn-sm" data-action="toast" data-msg="上传文档（演示）">${icon('upload', 12)} 上传</button></div>
+        <div class="panel-head"><h3>${icon('file', 15)} 文档与产出</h3><button class="btn btn-sm" data-action="document-upload">${icon('upload', 12)} 上传文本</button></div>
         <div class="doc-list">${docs || '<div class="panel-body muted small">暂无文档</div>'}</div>
       </div>
     `;

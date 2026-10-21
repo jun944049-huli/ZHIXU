@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, backup } from 'node:sqlite';
 import { snapshotSchema, type WorkbenchSnapshot } from '../shared/contracts';
 
 export interface SettingsCodec {
@@ -107,5 +107,9 @@ export class WorkbenchStore {
 
   close(): void {
     this.db.close();
+  }
+
+  async backup(path: string): Promise<void> {
+    await backup(this.db, path);
   }
 }

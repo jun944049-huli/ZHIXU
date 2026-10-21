@@ -76,6 +76,7 @@ function handleClick(e) {
     if (e.target === el) closeModal();
     return;
   }
+  if (handleFeatureAction(action, el)) return;
 
   switch (action) {
     case 'connector-config':
@@ -266,8 +267,7 @@ function handleClick(e) {
       openImpact();
       break;
     case 'apply-impact':
-      closeModal();
-      showToast('已按方案调整，并生成沟通话术');
+      previewImpactChange();
       break;
     case 'toast':
       showToast(el.dataset.msg || '演示操作');
@@ -401,6 +401,16 @@ function handleKeydown(e) {
 }
 
 function handleChange(e) {
+  if (e.target.id === 'profile-period') {
+    state.profileDays = e.target.value;
+    render();
+    return;
+  }
+  if (e.target.id === 'report-project') {
+    state.reportProject = e.target.value;
+    render();
+    return;
+  }
   if (e.target.id === 'today-date-input' && e.target.value) {
     setTodayDate(e.target.value, 'day');
     return;
@@ -483,6 +493,7 @@ async function boot() {
   state.reportDate = DB.meta.today;
   loadLocalOverrides();
   initializeIntegrations();
+  initializeFeatures();
   updateTaskCapacity();
   try {
     const params = new URLSearchParams(location.search);

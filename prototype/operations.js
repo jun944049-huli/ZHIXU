@@ -19,6 +19,7 @@ function toggleTask(id) {
     ...Object.values(DB.taskCalendar || {}).flat()].find(t => t.id === id);
   if (!task) return;
   task.done = !task.done;
+  if (task.done && DB.runningTimer?.taskId === id) stopTaskTimer();
   task.completedAt = task.done ? new Date().toISOString() : null;
   updateTaskCapacity();
   render();
@@ -59,7 +60,7 @@ async function saveProject() {
     progress, health: document.getElementById('project-health').value,
     next: document.getElementById('project-next').value.trim() || '未安排',
     nextDate: document.getElementById('project-next-date').value.trim() || '—',
-    updated: '刚刚'
+    updated: '刚刚', customValues: { ...existing?.customValues, ...readCustomFields('project') }
   };
   if (existing) Object.assign(existing, project);
   else DB.projects.push(project);
@@ -149,8 +150,10 @@ async function confirmInbox() {
   const project = document.getElementById('inbox-project').value;
   const estimate = document.getElementById('inbox-estimate').value.trim();
   const due = document.getElementById('inbox-due').value.trim();
-  if (!title || parseEstimateHours(estimate) <= 0) {
-    showToast('请填写任务标题和预计时长（例如 2h 或 30m）');
+  const p90 = document.getElementById('inbox-p90')?.value.trim() || item.p90;
+  const type = document.getElementById('inbox-type')?.value || item.type;
+  if (!title || parseEstimateHours(estimate) <= 0 || parseEstimateHours(p90) < parseEstimateHours(estimate)) {
+    showToast('请填写标题和有效时长，P90 不得小于 P50（例如 2h 或 30m）');
     return;
   }
   const id = newRecordId('task');
@@ -162,7 +165,7 @@ async function confirmInbox() {
   });
   addConfirmedTask({
     id, title, project: project || null, estimate, due,
-    priority: item.priority || 'P2', sourceId, done: false, createdAt: new Date().toISOString()
+    priority: item.priority || 'P2', p90, type, sourceId, done: false, createdAt: new Date().toISOString()
   }, DB.meta.today, ['P0', 'P1'].includes(item.priority) ? 'must' : 'should');
   DB.inboxArchive = DB.inboxArchive || [];
   DB.inboxArchive.push({ ...item, confirmedTask: id, confirmedAt: new Date().toISOString() });

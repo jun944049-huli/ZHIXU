@@ -174,11 +174,11 @@ function refreshAIProviderUI() {
   const statusEl = document.getElementById('sidebar-ai-status');
   const pulse = document.getElementById('sidebar-ai-pulse');
   if (nameEl) nameEl.textContent = cfg.name;
-  if (statusEl) statusEl.textContent = cfg.id === 'local' ? '未配置' : '已连接';
+  if (statusEl) statusEl.textContent = cfg.id === 'local' ? '未配置' : '已配置';
   if (pulse) pulse.className = 'pulse' + (cfg.id === 'local' ? ' off' : '');
   const pill = document.getElementById('topbar-ai-pill');
   if (pill) {
-    pill.innerHTML = `<span class="dot ${cfg.id === 'local' ? 'off' : ''}"></span><strong>${esc(cfg.name)}</strong><span>${cfg.id === 'local' ? '未配置 · 本地规则' : '已连接 · ' + esc(cfg.model)}</span>`;
+    pill.innerHTML = `<span class="dot ${cfg.id === 'local' ? 'off' : ''}"></span><strong>${esc(cfg.name)}</strong><span>${cfg.id === 'local' ? '未配置 · 本地规则' : '已配置 · ' + esc(cfg.model)}</span>`;
   }
 }
 

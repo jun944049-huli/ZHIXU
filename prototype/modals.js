@@ -69,6 +69,7 @@ function openProjectEditor(id) {
             <input class="input" id="project-next" maxlength="80" value="${esc(p.next === '未安排' ? '' : p.next)}"></div>
           <div class="field"><label for="project-next-date">节点日期</label>
             <input class="input" id="project-next-date" maxlength="30" value="${esc(p.nextDate === '—' ? '' : p.nextDate)}" placeholder="例如 2026-11-01"></div>
+          ${customFieldInputs('project', p)}
         </div>
         <div class="modal-foot">
           <button class="btn" data-action="close-modal">取消</button>
@@ -459,7 +460,7 @@ function parseWorkflow() {
   DB.workflow.version += 1;
   DB.workflow.updated = '刚刚';
   updateWorkflowChrome();
-  showToast(`已解析 ${rules.length} 条规则，保存后生效`);
+  showToast(`已提取 ${rules.length} 条规划草稿`);
 }
 
 function saveWorkflow() {
@@ -468,7 +469,7 @@ function saveWorkflow() {
   DB.workflow.text = ta.value.trim();
   DB.workflow.updated = '刚刚';
   updateWorkflowChrome();
-  showToast('工作流已保存，下次捕获会按它执行');
+  showToast('工作流规划已保存，自动执行尚未接入');
 }
 
 const workflowTemplates = {
@@ -633,14 +634,17 @@ function openCommand() {
           <button class="command-item" data-action="capture">${icon('plus', 15)} 快速捕获 <span class="ci-sub">Ctrl Space</span></button>
           <button class="command-item" data-action="impact">${icon('zap', 15)} 项目影响</button>
           <button class="command-item" data-action="profile-settings">${icon('settings', 15)} 设置</button>
-          <button class="command-item" data-action="toast" data-msg="正在生成周报…（演示）">${icon('sparkles', 15)} 生成周报</button>
+          <button class="command-item" data-action="command-weekly">${icon('sparkles', 15)} 生成周报</button>
           <button class="command-item" data-action="new-project">${icon('folder', 15)} 新建项目</button>
 
           <div class="command-group-label">项目</div>
           ${DB.projects.slice(0, 4).map(p => `<button class="command-item" data-action="project" data-id="${p.id}">${icon('folder', 15)} ${esc(p.name)} <span class="ci-sub">${p.progress}%</span></button>`).join('')}
+          <div class="command-group-label">任务</div>
+          ${allWorkbenchTasks().map(t => `<button class="command-item" data-action="task-edit" data-id="${esc(t.id)}">${icon('check', 15)} ${esc(t.title)}</button>`).join('')}
+          <div class="command-group-label">文档</div>
+          ${DB.documents.map(d => `<button class="command-item" data-action="document-open" data-id="${esc(d.id)}">${icon('file', 15)} ${esc(d.title)}</button>`).join('')}
         </div>
         <div class="command-foot">
-          <span class="k">↑↓ 选择</span>
           <span class="k">↵ 打开</span>
           <span class="k">Esc 关闭</span>
           <span style="margin-left:auto">${esc(assistantName())} · 本地优先</span>
@@ -672,99 +676,13 @@ function filterCommand(query) {
   });
 }
 
-const impactOptions = {
-  scope: {
-    title: '压缩范围，先给结论',
-    sub: '2.5h → 1h，保住今天必做',
-    msg: '王总，竞品分析我先出一页结论（1h），今天 17:00 前发您；完整版周四补。这样不影响星火演示准备。'
-  },
-  defer: {
-    title: '延后「整理联调问题」',
-    sub: '移到明天 10:00，演示准备少 2h 缓冲',
-    msg: '王总，今天星火演示准备是硬节点。竞品分析我明早 10:00 前给您，可以吗？'
-  },
-  overtime: {
-    title: '今晚加班 1.8h',
-    sub: '不改变承诺，但会拉高本周超载',
-    msg: '王总，竞品分析我今晚加班做，明天上午发您。星火演示准备不受影响。'
-  },
-  decline: {
-    title: '改到下周，生成沟通话术',
-    sub: '需要老板确认优先级',
-    msg: '王总，今天已有 6.5h 承诺，竞品分析 2.5h 放不下。建议排到下周一二选一，您看哪个优先？'
-  }
-};
-
 function openImpact() {
-  const opt = impactOptions[state.impactOption] || impactOptions.scope;
-  const root = document.getElementById('modal-root');
-  root.innerHTML = `
-    <div class="modal-backdrop" data-action="backdrop">
-      <div class="modal lg" role="dialog" aria-modal="true" aria-label="插单影响分析">
-        <div class="modal-head">
-          <div class="ai-orb" style="background:linear-gradient(135deg,#1F46C4,#7B5BE3)">${icon('zap', 16)}</div>
-          <div>
-            <h2>插单影响分析</h2>
-            <p class="sub">先算清楚会挤掉什么，再决定接不接。不是拒绝，是把取舍说清楚。</p>
-          </div>
-          <button class="icon-btn" data-action="close-modal" aria-label="关闭">${icon('x', 16)}</button>
-        </div>
-
-        <div class="modal-body">
-          <div class="impact-summary">
-            <div class="task-name">客户临时要一份竞品分析</div>
-            <div class="task-meta">
-              <span>${icon('user', 10)} 王总 · 飞书</span>
-              <span>${icon('clock', 10)} 今天 17:00</span>
-              <span>${icon('sparkles', 10)} 预估 2.5h</span>
-              <span class="chip red">P1</span>
-            </div>
-          </div>
-
-          <div class="impact-bars">
-            <div class="impact-bar-row">
-              <span>当前负载</span>
-              <div class="impact-bar"><span style="width:90%"></span></div>
-              <span class="val"><b>6.5h</b> / 7.2h</span>
-            </div>
-            <div class="impact-bar-row">
-              <span>加入之后</span>
-              <div class="impact-bar"><span class="over" style="width:100%"></span></div>
-              <span class="val"><b style="color:var(--red)">9.0h</b> / 7.2h</span>
-            </div>
-          </div>
-
-          <div class="impact-note">
-            ${icon('alert', 14)}
-            <span><strong>会挤掉「整理联调问题」的 2h 缓冲</strong>，按当前排期预计延期 1 天，直接影响周三给王总的交付。</span>
-          </div>
-
-          <div class="impact-options">
-            ${Object.entries(impactOptions).map(([key, o]) => `
-              <button class="impact-option ${state.impactOption === key ? 'active' : ''}" data-action="impact-option" data-opt="${key}">
-                <span class="radio"></span>
-                <span>
-                  <span class="opt-title">${o.title}</span>
-                  <span class="opt-sub">${o.sub}</span>
-                </span>
-              </button>
-            `).join('')}
-          </div>
-
-          <div class="message-preview">
-            <div class="msg-label">${icon('message', 11)} 可直接发给王总</div>
-            ${esc(opt.msg)}
-          </div>
-        </div>
-
-        <div class="modal-foot">
-          <div class="left">
-            <span class="chip outline">${icon('shield', 11)} 调整前会二次确认</span>
-          </div>
-          <button class="btn" data-action="close-modal">先不接</button>
-          <button class="btn btn-primary" data-action="apply-impact">${icon('check', 13)} 按这个方案调整</button>
-        </div>
-      </div>
-    </div>
-  `;
+  state.pendingImpact = null;
+  const tasks = tasksOnDate(DB.meta.today).filter(t => !t.done);
+  localModal('插单影响分析', `<p class="small muted">当前承诺 ${DB.capacity.committed}h / 可用 ${DB.capacity.available}h</p>
+    <div class="form-grid">${inputField('impact-title', '新增事项', '')}
+    ${inputField('impact-hours', '预计小时', '1', 'number', 'min="0.1" max="1000" step="0.1"')}
+    ${selectField('impact-mode', '安排方案', [['today', '加入今日'], ['defer', '将一项今日任务移至明天'], ['nextweek', '安排到下周一']], 'today')}
+    ${selectField('impact-move', '需要移至明天的任务', tasks.map(t => [t.id, t.title]), tasks[0]?.id)}</div>`,
+    '<button class="btn" data-action="close-modal">取消</button><button class="btn btn-primary" data-action="impact-preview">预览调整</button>');
 }

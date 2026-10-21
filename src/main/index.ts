@@ -1,9 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, net, safeStorage } from 'electron';
-import { join } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { WorkbenchStore } from './database';
 import { polish } from './polish';
 import { runIntegration } from './integrations';
+import { exportBuffer, exportSchema, reportHTML } from './exports';
 
 let store: WorkbenchStore;
 let window: BrowserWindow | null = null;
@@ -42,6 +43,41 @@ else {
     ipcMain.handle('workbench:save', (event, payload: unknown) => {
       checkSender(event);
       store.save(payload);
+    });
+    ipcMain.handle('workbench:export', async (event, input: unknown) => {
+      checkSender(event);
+      const payload = exportSchema.parse(input);
+      const filename = payload.title.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 100);
+      const result = await dialog.showSaveDialog(window!, {
+        title: '导出文件', defaultPath: `${filename}.${payload.format}`,
+        filters: [{ name: payload.format.toUpperCase(), extensions: [payload.format] }]
+      });
+      if (result.canceled || !result.filePath) return { saved: false };
+      if (payload.format === 'pdf') {
+        const printWindow = new BrowserWindow({ show: false, webPreferences: {
+          sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false
+        } });
+        try {
+          await printWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(reportHTML(payload.title, payload.text)));
+          writeFileSync(result.filePath, await printWindow.webContents.printToPDF({ pageSize: 'A4', printBackground: true }));
+        } finally { printWindow.destroy(); }
+      } else writeFileSync(result.filePath, await exportBuffer(payload));
+      return { saved: true };
+    });
+    ipcMain.handle('workbench:backup', async event => {
+      checkSender(event);
+      const now = new Date();
+      const localDate = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+      const result = await dialog.showSaveDialog(window!, {
+        title: '备份本地数据库', defaultPath: `Xiaoyu-backup-${localDate}.sqlite`,
+        filters: [{ name: 'SQLite 数据库', extensions: ['sqlite'] }]
+      });
+      if (result.canceled || !result.filePath) return { saved: false };
+      if (resolve(dataDir, 'workbench.sqlite').toLowerCase() === resolve(result.filePath).toLowerCase()) {
+        throw new Error('备份须另存为其他文件，请勿覆盖正在使用的数据库');
+      }
+      await store.backup(result.filePath);
+      return { saved: true };
     });
     ipcMain.handle('workbench:polish', (event, payload: unknown) => {
       checkSender(event);

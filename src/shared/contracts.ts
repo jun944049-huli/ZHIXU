@@ -51,4 +51,6 @@ export interface DesktopAPI {
   save(snapshot: WorkbenchSnapshot): Promise<void>;
   polish(payload: unknown): Promise<{ text: string; model: string; provider: string }>;
   integration(payload: unknown): Promise<IntegrationResult>;
+  exportFile(payload: unknown): Promise<{ saved: boolean }>;
+  backup(): Promise<{ saved: boolean }>;
 }

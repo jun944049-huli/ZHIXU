@@ -66,6 +66,18 @@ try {
   const integrationModal = await page.locator('.integration-modal').boundingBox();
   assert.ok(integrationModal.x >= 0 && integrationModal.x + integrationModal.width <= 391);
   await page.screenshot({ path: resolve(evidence, 'browser-integration-mobile.png') });
+  await page.locator('.integration-modal [data-action="close-modal"]').click();
+  for (const view of ['today', 'chat', 'inbox', 'projects', 'reports', 'profile', 'data']) {
+    await page.locator(`.nav [data-action="nav"][data-view="${view}"]`).click();
+    await finishAnimations();
+    const dimensions = await page.evaluate(() => ({
+      width: innerWidth, document: document.documentElement.scrollWidth,
+      right: document.querySelector('#view').getBoundingClientRect().right
+    }));
+    assert.ok(dimensions.document <= dimensions.width + 1 && dimensions.right <= dimensions.width + 1,
+      view + ': ' + JSON.stringify(dimensions));
+    await page.screenshot({ path: resolve(evidence, `browser-mobile-${view}.png`), fullPage: true });
+  }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: true, projectId, overflow }));
 } finally {

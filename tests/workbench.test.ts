@@ -18,9 +18,11 @@ function workbench() {
     scrollChatToBottom: () => {},
     persistWorkbench: async () => { saved.push(runInContext('JSON.stringify(DB)', context)); }
   });
-  for (const file of ['data.js', 'shared.js', 'views-chat.js', 'views-project.js', 'operations.js', 'integrations.js']) {
+  for (const file of ['data.js', 'shared.js', 'views-chat.js', 'views-project.js', 'views-output.js',
+    'operations.js', 'integrations.js', 'features.js', 'analytics.js']) {
     runInContext(readFileSync(resolve('prototype', file), 'utf8'), context, { filename: file });
   }
+  runInContext('initializeIntegrations(); initializeFeatures();', context);
   return {
     run: (code: string) => runInContext(code, context),
     fields, saved, preferences
@@ -135,4 +137,99 @@ test('connector imports deduplicate pending and already-confirmed inbox records'
   w.run("DB.inboxArchive = [DB.inbox.shift()]");
   assert.equal(w.run("importIntegrationRecords('ics', [{ externalId: 'event-1', title: '会议', raw: '原始日程' }])"), 0);
   assert.equal(w.run('DB.inboxArchive[0].raw'), '原始日程');
+});
+
+test('moving a task removes the previous date and preserves identity and inactive custom values', async () => {
+  const w = workbench();
+  w.run("DB.tasks.must[0].customValues = { hidden: '保留旧值' }; state.editTaskId = DB.tasks.must[0].id");
+  const id = w.run('state.editTaskId');
+  for (const [key, value] of Object.entries({
+    title: '改期验收', project: 'p2', date: '2030-01-01', due: '2030-01-02',
+    hours: '2', priority: 'P3', assignee: 'Tester', note: '原有记录仍在'
+  })) w.fields['task-' + key] = { value, checkValidity: () => true };
+  const before = w.run('allWorkbenchTasks().length');
+  await w.run('saveTaskEditor()');
+  assert.equal(w.run('allWorkbenchTasks().length'), before);
+  assert.equal(w.run(`tasksOnDate(DB.meta.today).some(t=>t.id===${JSON.stringify(id)})`), false);
+  assert.equal(w.run(`taskLocation(${JSON.stringify(id)}).date`), '2030-01-01');
+  assert.equal(w.run(`taskLocation(${JSON.stringify(id)}).task.customValues.hidden`), '保留旧值');
+});
+
+test('editing a timed task to completed stops timing and reopening clears the completion date', async () => {
+  const w = workbench();
+  w.run("state.editTaskId = 't1'");
+  const task = w.run("taskLocation('t1').task");
+  for (const [key, value] of Object.entries({
+    title: task.title, project: task.project, date: w.run('DB.meta.today'), due: task.due,
+    hours: '1', priority: 'P1', assignee: 'QA', note: '', status: 'done'
+  })) w.fields['task-' + key] = { value: String(value || ''), checkValidity: () => true };
+  await w.run("toggleTimer('t1')");
+  w.run('DB.runningTimer.startedAt -= 120000');
+  await w.run('saveTaskEditor()');
+  assert.equal(w.run("taskLocation('t1').task.done"), true);
+  assert.equal(w.run('DB.runningTimer'), null);
+  assert.ok(w.run('DB.timeEntries[0].seconds') >= 120);
+  w.fields['task-status'].value = 'doing';
+  await w.run('saveTaskEditor()');
+  assert.equal(w.run("taskLocation('t1').task.done"), false);
+  assert.equal(w.run("taskLocation('t1').task.completedAt"), null);
+  assert.equal(w.run("taskLocation('t1').task.status"), '进行中');
+});
+
+test('upgrading legacy project task details preserves records without duplicating on reload', () => {
+  const w = workbench();
+  w.run(`DB.projectDetails.p1.tasks = [{ title: '旧明细升级', priority: 'P2',
+    status: '已完成', due: '12/01' }]; initializeFeatures()`);
+  const count = w.run('allWorkbenchTasks().length');
+  assert.equal(w.run("allWorkbenchTasks().find(t => t.title === '旧明细升级').done"), true);
+  w.run('initializeFeatures()');
+  assert.equal(w.run('allWorkbenchTasks().length'), count);
+  assert.equal(w.run('DB.projectDetails.p1.tasks.length'), 0);
+});
+
+test('ignoring and restoring inbox records keeps source identity available for deduplication', async () => {
+  const w = workbench();
+  w.run("DB.inbox[0].connectorId = 'ics'; DB.inbox[0].externalId = 'stable-event'; archiveInbox([DB.inbox[0].id])");
+  assert.equal(w.run("importIntegrationRecords('ics', [{externalId:'stable-event', title:'重复', raw:'原文'}])"), 0);
+  await w.run("handleFeatureAction('inbox-restore', {dataset:{id:DB.inboxArchive[0].id}})");
+  assert.equal(w.run("DB.inbox[0].externalId"), 'stable-event');
+  assert.equal(w.run('DB.inboxArchive.length'), 0);
+});
+
+test('timers switch cleanly and completing a timed task records the elapsed session', async () => {
+  const w = workbench();
+  await w.run("toggleTimer('t1')");
+  w.run('DB.runningTimer.startedAt -= 120000');
+  await w.run("toggleTimer('t2')");
+  assert.equal(w.run('DB.timeEntries.length'), 1);
+  assert.ok(w.run('DB.timeEntries[0].seconds') >= 120);
+  w.run("toggleTask('t2')");
+  assert.equal(w.run('DB.runningTimer'), null);
+  assert.equal(w.run('DB.timeEntries.length'), 2);
+});
+
+test('weekly and project reports follow edited records instead of fixed prototype content', () => {
+  const w = workbench();
+  w.run("DB.tasks = {must:[],should:[],could:[]}; DB.taskCalendar={}; state.reportDate='2026-10-21'");
+  assert.equal(w.run("getReport('weekly','2026-10-21').facts"), 0);
+  w.run("DB.projects=[]; state.report='project'");
+  assert.equal(w.run("getReport('project').facts"), 0);
+  assert.equal(w.run("reportText(getReport('project')).includes('测试库')"), false);
+});
+
+test('risk scores validate before saving and closing a risk updates project counts', async () => {
+  const w = workbench();
+  w.run("state.recordEditor={kind:'risk',projectId:'p1'}");
+  for (const [id, value] of Object.entries({ 'record-title': '测试风险', 'risk-probability': '9',
+    'risk-impact': '4', 'record-owner': 'QA', 'record-note': '应对动作', 'record-status': 'closed' })) {
+    w.fields[id] = { value, checkValidity: () => true };
+  }
+  const before = w.run('DB.projectDetails.p1.risks.length');
+  await w.run('saveRecordEditor()');
+  assert.equal(w.run('DB.projectDetails.p1.risks.length'), before);
+  w.fields['risk-probability'].value = '4';
+  await w.run('saveRecordEditor()');
+  assert.equal(w.run('DB.projectDetails.p1.risks.length'), before + 1);
+  assert.equal(w.run('DB.projectDetails.p1.risks.at(-1).score'), 16);
+  assert.equal(w.run("projectById('p1').risks"), before);
 });

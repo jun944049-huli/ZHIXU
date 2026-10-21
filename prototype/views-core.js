@@ -37,7 +37,7 @@ function renderSidebar() {
         </span>
       </div>
 
-      <button class="workspace-switch" data-action="toast" data-msg="工作台名称跟随姓名，无需单独设置">
+      <button class="workspace-switch" data-action="profile-settings">
         <span class="workspace-avatar">${esc((DB.user.name || '李').slice(0, 1))}</span>
         <span class="workspace-meta">
           <span class="workspace-name">${esc(DB.user.workspace || DB.user.name + '的工作台')}</span>
@@ -70,7 +70,7 @@ function renderSidebar() {
       <div class="sidebar-footer">
         <div class="ai-status-card">
           <span class="pulse ${cfg.id === 'local' ? 'off' : ''}" id="sidebar-ai-pulse"></span>
-          <span><span class="ai-model" id="sidebar-ai-name">${esc(cfg.name)}</span> · <span id="sidebar-ai-status">${cfg.id === 'local' ? '未配置' : '已连接'}</span></span>
+          <span><span class="ai-model" id="sidebar-ai-name">${esc(cfg.name)}</span> · <span id="sidebar-ai-status">${cfg.id === 'local' ? '未配置' : '已配置'}</span></span>
           ${icon('sparkles', 13, 'ai-spark')}
         </div>
         <button class="user-chip" data-action="profile-settings" title="编辑姓名、角色、头像与助手名称">
@@ -119,9 +119,9 @@ function renderTopbar() {
         <div class="ai-pill" id="topbar-ai-pill">
           <span class="dot ${cfg.id === 'local' ? 'off' : ''}"></span>
           <strong>${esc(cfg.name)}</strong>
-          <span>${cfg.id === 'local' ? '未配置 · 本地规则' : '已连接 · ' + esc(cfg.model)}</span>
+          <span>${cfg.id === 'local' ? '未配置 · 本地规则' : '已配置 · ' + esc(cfg.model)}</span>
         </div>
-        <button class="icon-btn" data-action="toast" data-msg="今天没有新的通知" aria-label="通知">
+        <button class="icon-btn" data-action="notifications" aria-label="通知">
           ${icon('bell', 17)}
         </button>
         <button class="btn btn-primary btn-sm" data-action="capture">
@@ -157,7 +157,7 @@ function taskRow(t) {
           <span class="priority ${t.priority.toLowerCase()}">${t.priority}</span>
         </div>
         <div class="task-meta">${meta}</div>
-        ${t.blocked ? `<div class="task-note blocked">${icon('alert', 11)} 等运维开通测试库 · 已等 5 天</div>` : ''}
+        ${t.blocked ? `<div class="task-note blocked">${icon('alert', 11)} ${esc(t.note || '任务存在阻塞')}</div>` : ''}
         ${t.focus ? `
           <div class="task-note">${icon('arrowRight', 11)} ${esc(t.note)}</div>
           <div class="sub-progress">
@@ -167,8 +167,8 @@ function taskRow(t) {
         ` : ''}
       </div>
       <div class="task-side">
-        <button class="icon-btn sm" data-action="toast" data-msg="计时器已启动（演示）" aria-label="开始计时">${icon('play', 13)}</button>
-        <button class="icon-btn sm" data-action="toast" data-msg="任务操作：改期 / 拆分 / 委派" aria-label="更多">${icon('more', 14)}</button>
+        <button class="icon-btn sm ${DB.runningTimer?.taskId === t.id ? 'timer-running' : ''}" data-action="task-timer" title="${esc(timerLabel(t.id))}" aria-label="${esc(timerLabel(t.id))}">${icon(DB.runningTimer?.taskId === t.id ? 'clock' : 'play', 13)}</button>
+        <button class="icon-btn sm" data-action="task-edit" data-id="${esc(t.id)}" title="编辑任务" aria-label="编辑任务">${icon('more', 14)}</button>
       </div>
     </div>
   `;
@@ -187,6 +187,7 @@ function renderToday() {
   const tomorrow = addDaysISO(baseToday, 1);
   const nextWeekStart = nextMondayISO(baseToday);
   const nextWeekEnd = addDaysISO(nextWeekStart, 6);
+  const weekLabel = weekStart === startOfWeekISO(baseToday) ? '本周' : weekStart === nextWeekStart ? '下周' : '所选周';
 
   const todayTasks = [...DB.tasks.must, ...DB.tasks.should, ...DB.tasks.could];
   const dayTasks = range === 'week'
@@ -197,21 +198,21 @@ function renderToday() {
   const totalHours = dayTasks.reduce((sum, t) => sum + parseEstimateHours(t.estimate), 0);
   const doneHours = doneTasks.reduce((sum, t) => sum + parseEstimateHours(t.estimate), 0);
 
-  const meetingW = c.meeting / c.available * 100;
-  const focusW = c.focus / c.available * 100;
-  const flexW = c.buffer / c.available * 100;
-  const committedPct = c.committed / c.available * 100;
+  const meetingW = Math.min(100, c.meeting / c.available * 100);
+  const focusW = Math.min(100 - meetingW, c.focus / c.available * 100);
+  const flexW = Math.max(0, 100 - meetingW - focusW);
+  const committedPct = Math.min(100, c.committed / c.available * 100);
   const remaining = (c.available - c.committed).toFixed(1);
 
   const isYesterday = range === 'day' && selected === yesterday;
   const isTomorrow = range === 'day' && selected === tomorrow;
   const dateHeading = range === 'week'
-    ? `${formatDateRange(weekStart, weekEnd)} · 下周`
+    ? `${formatDateRange(weekStart, weekEnd)} · ${weekLabel}`
     : formatDateFull(selected);
   const heading = isToday
     ? `早上好，${DB.user.name}`
     : range === 'week'
-      ? '下周要做什么'
+      ? `${weekLabel}的任务`
       : isYesterday
         ? '昨天完成了什么'
         : isTomorrow
@@ -227,7 +228,7 @@ function renderToday() {
       : '这一天没有安排任务。';
   } else {
     summary = dayTasks.length
-      ? `${range === 'week' ? '下周' : isTomorrow ? '明天' : '这一天'}共 <strong>${dayTasks.length} 项</strong>，预计投入 ${formatHours(totalHours)}。`
+      ? `${range === 'week' ? weekLabel : isTomorrow ? '明天' : '这一天'}共 <strong>${dayTasks.length} 项</strong>，预计投入 ${formatHours(totalHours)}。`
       : '这一天没有安排任务。';
   }
 
@@ -237,7 +238,7 @@ function renderToday() {
       <span class="count-badge">${count}</span>
       <span class="line"></span>
     </div>
-    ${tasks.map(taskRow).join('')}
+    ${filterTasks(tasks).map(taskRow).join('')}
   `;
 
   const emptyDay = `
@@ -258,7 +259,7 @@ function renderToday() {
       + taskSection('推进 · Should', DB.tasks.should, DB.tasks.should.length)
       + taskSection('可以等 · Could', DB.tasks.could, DB.tasks.could.length);
   } else if (range === 'week') {
-    panelTitle = '下周任务';
+    panelTitle = `${weekLabel}任务`;
     const groups = [];
     let cursor = weekStart;
     while (cursor <= weekEnd) {
@@ -273,7 +274,7 @@ function renderToday() {
               <span class="line"></span>
               <span>${formatHours(hours)}</span>
             </div>
-            ${items.map(taskRow).join('')}
+            ${filterTasks(items).map(taskRow).join('')}
           </div>
         `);
       }
@@ -394,7 +395,7 @@ function renderToday() {
         <div class="work-schedule-head">
           <span class="ws-title">${icon('clock', 12)} 工作时间 <b>${workHours}</b></span>
           <span class="tiny muted">午休 ${workday.lunch}</span>
-          <button class="btn btn-sm btn-ghost ws-edit" data-action="toast" data-msg="调整工作时间（演示）">${icon('edit', 11)} 调整</button>
+          <button class="btn btn-sm btn-ghost ws-edit" data-action="work-hours">${icon('edit', 11)} 调整</button>
         </div>
         <div class="time-blocks">${scheduleRows}</div>
       </div>
@@ -407,7 +408,7 @@ function renderToday() {
       <div class="ds-item"><span class="ds-label">预计投入</span><span class="ds-value">${formatHours(totalHours)}</span></div>
       <div class="ds-item"><span class="ds-label">${isPast ? '完成' : '状态'}</span><span class="ds-value">${isPast ? (dayTasks.length ? `${doneTasks.length}/${dayTasks.length}` : '—') : '待执行'}</span></div>
       ${isPast ? `<div class="ds-item"><span class="ds-label">完成投入</span><span class="ds-value">${formatHours(doneHours)}</span></div>` : ''}
-      <div class="ds-note">工作时间 ${workHours} · ${range === 'week' ? '下周视图' : '日期视图'} · 只读</div>
+      <div class="ds-note">工作时间 ${workHours} · ${range === 'week' ? '周视图' : '日期视图'}</div>
     </div>
   `;
 
@@ -439,9 +440,9 @@ function renderToday() {
     ${isToday ? `
       <div class="overdue-strip">
         ${icon('alert', 15)}
-        <span class="title">2 项逾期</span>
+        <span class="title">${DB.overdue.length} 项逾期</span>
         <span class="items">${DB.overdue.map(o => `${esc(o.title)}（${o.days} 天）`).join(' · ')}</span>
-        <button class="btn" data-action="toast" data-msg="已打开逾期处理（演示）">现在处理 ${icon('arrowRight', 12)}</button>
+        <button class="btn" data-action="overdue">现在处理 ${icon('arrowRight', 12)}</button>
       </div>
     ` : ''}
 
@@ -451,11 +452,12 @@ function renderToday() {
           <div class="panel-head">
             <h3>${icon('target', 15)} ${panelTitle} <span class="count-badge">${dayTasks.length}</span></h3>
             <div class="row gap-6">
-              <button class="btn btn-sm btn-ghost" data-action="toast" data-msg="按项目 / 优先级筛选（演示）">${icon('filter', 12)} 筛选</button>
-              <button class="btn btn-sm" data-action="toast" data-msg="已按「承诺优先」排序">承诺优先 ${icon('chevronDown', 11)}</button>
+              <button class="btn btn-sm btn-ghost" data-action="task-filter">${icon('filter', 12)} ${state.taskFilterProject || state.taskFilterStatus ? '已筛选' : '筛选'}</button>
+              <button class="btn btn-sm" data-action="task-filter">${state.taskSort === 'estimate' ? '预计时长' : '优先级'} ${icon('chevronDown', 11)}</button>
             </div>
           </div>
           ${taskBody}
+          ${dayTasks.length && !filterTasks(dayTasks).length ? '<p class="panel-body muted">没有符合筛选条件的任务</p>' : ''}
         </div>
       </div>
 
@@ -469,8 +471,8 @@ function renderToday() {
 
         <div class="card rail-card">
           <div class="rail-head">
-            <h3>${icon('clock', 14)} 等待墙 <span class="chip amber">3</span></h3>
-            <button class="icon-btn sm" data-action="toast" data-msg="等待事项管理（演示）">${icon('arrowRight', 13)}</button>
+            <h3>${icon('clock', 14)} 等待墙 <span class="chip amber">${DB.waiting.length}</span></h3>
+            <button class="icon-btn sm" data-action="waiting" aria-label="管理等待事项">${icon('arrowRight', 13)}</button>
           </div>
           <div class="wait-list">${waiting}</div>
         </div>
@@ -479,7 +481,7 @@ function renderToday() {
           <div class="card rail-card">
             <div class="rail-head">
               <h3>${icon('calendar', 14)} 今日会议</h3>
-              <span class="tiny muted">3 场 · 1.75h</span>
+              <span class="tiny muted">${DB.meetings.length} 场</span>
             </div>
             <div class="meeting-list">${meetings}</div>
           </div>
@@ -493,7 +495,7 @@ function renderInbox() {
   const item = DB.inbox.find(i => i.id === state.inboxId) || DB.inbox[0];
   if (!item) return `
     <div class="page-head"><div><h1>收件箱</h1></div>
-      <button class="btn btn-primary" data-action="capture">${icon('plus', 14)} 新捕获</button>
+      <div class="head-actions"><button class="btn" data-action="inbox-archive">已归档</button><button class="btn btn-primary" data-action="capture">${icon('plus', 14)} 新捕获</button></div>
     </div>
     <div class="empty-day">${icon('check', 20)}<div><b>收件箱已清空</b><p>已确认的事项可以在今日清单中查看。</p></div></div>
   `;
@@ -524,7 +526,7 @@ function renderInbox() {
 
   const subtasks = item.subtasks.map((s, idx) => `
     <div class="subtask-row">
-      <span class="mini-check ${idx < 2 ? 'on' : ''}">${idx < 2 ? icon('check', 9) : ''}</span>
+      <span class="muted">${idx + 1}.</span>
       <span>${esc(s)}</span>
     </div>
   `).join('');
@@ -537,7 +539,8 @@ function renderInbox() {
         <p class="sub">所有来源先落到这里。AI 只出草稿，你确认后才进入项目。</p>
       </div>
       <div class="head-actions">
-        <button class="btn" data-action="toast" data-msg="已批量归档 2 条（演示）">${icon('inbox', 14)} 批量整理</button>
+        <button class="btn" data-action="inbox-archive">已归档</button>
+        <button class="btn" data-action="inbox-batch">${icon('inbox', 14)} 批量整理</button>
         <button class="btn btn-primary" data-action="capture">${icon('plus', 14)} 新捕获</button>
       </div>
     </div>
@@ -590,7 +593,7 @@ function renderInbox() {
               ${lowConfidence ? `
                 <div class="basis warn">
                   ${icon('alert', 12)}
-                  <span>不确定。候选：${item.alternatives.map(esc).join(' / ') || '暂无'}。你的选择会写回项目别名，下次自动学会。</span>
+                  <span>候选：${item.alternatives.map(esc).join(' / ') || '暂无'}。请确认归属项目。</span>
                 </div>
               ` : `
                 <div class="hint">命中项目别名「${item.project ? esc(projectById(item.project).name) : '—'}」+ 近期任务上下文</div>
@@ -599,7 +602,7 @@ function renderInbox() {
 
             <div class="field">
               <label>类型</label>
-              <select class="select">
+              <select class="select" id="inbox-type">
                 <option>${esc(item.type)}</option>
                 <option>分析整理</option>
                 <option>沟通协调</option>
@@ -619,7 +622,7 @@ function renderInbox() {
             </div>
             <div class="field">
               <label>预估 P90</label>
-              <input class="input" value="${esc(item.p90)}">
+              <input class="input" id="inbox-p90" value="${esc(item.p90)}">
             </div>
 
             <div class="field full">
@@ -642,8 +645,8 @@ function renderInbox() {
               <span class="chip">${icon('clock', 11)} AI 估时</span>
               <span class="chip outline">${icon('link', 11)} 关联原文</span>
             </div>
-            <button class="btn" data-action="toast" data-msg="已拆分为 2 个任务（演示）">${icon('layers', 13)} 拆分</button>
-            <button class="btn" data-action="toast" data-msg="已忽略，可在回收站恢复">忽略</button>
+            <button class="btn" data-action="inbox-split">${icon('layers', 13)} 拆分</button>
+            <button class="btn" data-action="inbox-ignore">忽略</button>
             <button class="btn btn-primary" data-action="confirm-inbox">${icon('check', 13)} 确认加入今日</button>
           </div>
         </div>
