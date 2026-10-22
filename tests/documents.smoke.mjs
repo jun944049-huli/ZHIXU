@@ -71,7 +71,26 @@ try {
   await close();
   await upload(['坏文件.pdf']);
   assert.match(await page.locator('#modal-root').innerText(), /无法解析/);
+  assert.equal(await page.locator('#text-file').evaluate(input => input.files[0].name), '坏文件.pdf');
+  assert.equal(await page.locator('#text-file').isEnabled(), true);
+  assert.match(await page.locator('[data-action="document-import"]').innerText(), /重试失败文件/);
+  await page.locator('[data-action="document-import"]').click();
+  await page.waitForFunction(() => !state.documentImportBusy);
+  assert.equal(await page.locator('#text-file').evaluate(input => input.files.length), 1);
+  assert.match(await page.locator('#document-import-results').innerText(), /扩展名与文件内容不匹配/);
   assert.equal(await page.evaluate(() => DB.documents.length), 4);
+  await close();
+  await upload(['坏文件.pdf', '附件需求.docx']);
+  assert.equal(await page.locator('#text-file').evaluate(input => input.files.length), 2);
+  assert.equal(await page.locator('.document-import-result.saved').count(), 1);
+  assert.equal(await page.locator('.document-import-result.failed').count(), 1);
+  const tasksBeforeRetry = await page.evaluate(() => allWorkbenchTasks().length);
+  await page.locator('[data-action="document-import"]').click();
+  await page.waitForFunction(() => !state.documentImportBusy);
+  assert.equal(await page.evaluate(() => DB.documents.length), 4);
+  assert.equal(await page.evaluate(() => allWorkbenchTasks().length), tasksBeforeRetry);
+  await page.locator('#text-file').setInputFiles([]);
+  assert.equal(await page.locator('.document-import-result').count(), 0);
   await close();
   await upload(['新项目资料.md']);
   assert.equal(await page.evaluate(() => DB.projects.length), initialProjects);
@@ -120,9 +139,31 @@ try {
   await page.locator('[data-action="document-original"]').click();
   await page.waitForFunction(() => document.querySelector('#toast-root').textContent.includes('原文件已导出'));
   assert.deepEqual(readFileSync(join(exports, '附件需求.docx')), readFileSync(join(files, '附件需求.docx')));
+  await close();
+  await page.locator('[data-action="chat-attachment"]').click();
+  await page.locator('#text-file').setInputFiles({ name: '临时保存故障.md', mimeType: 'text/markdown',
+    buffer: Buffer.from('完成临时保存故障的附件核对') });
+  await page.evaluate(() => {
+    const originalSave = persistWorkbench;
+    persistWorkbench = async () => {
+      persistWorkbench = originalSave;
+      throw new Error('模拟临时磁盘写入失败');
+    };
+  });
+  await page.locator('[data-action="document-import"]').click();
+  await page.waitForFunction(() => !state.documentImportBusy);
+  assert.match(await page.locator('#document-import-results').innerText(), /本地记录保存失败.*模拟临时磁盘写入失败/);
+  assert.equal(await page.locator('#text-file').evaluate(input => input.files[0].name), '临时保存故障.md');
+  assert.equal(await page.evaluate(() => DB.documents.length), 5);
+  await page.locator('[data-action="document-import"]').click();
+  await page.waitForFunction(() => !state.documentImportBusy);
+  await page.locator('.document-editor').waitFor();
+  assert.equal(await page.evaluate(() => DB.documents.length), 6);
   assert.deepEqual(errors, []);
   const result = { passed: true, formats: ['DOCX', 'XLSX', 'PDF', 'PPTX', 'Markdown'],
-    documents: 5, newProjectsAfterConfirmation: 1, createdTasks: 8, exported: readdirSync(exports), profile };
+    documents: 6, newProjectsAfterConfirmation: 1, createdTasks: 8,
+    failedSelectionRetained: true, partialBatchIdempotent: true, transientFailureRetried: true,
+    exported: readdirSync(exports), profile };
   writeFileSync(join(evidence, 'document-audit.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
 } catch (error) {

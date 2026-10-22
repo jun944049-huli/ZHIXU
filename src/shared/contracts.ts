@@ -42,6 +42,7 @@ export const polishSchema = z.object({
   tone: z.enum(['简洁', '正式', '有说服力', '温和']).default('简洁'),
   apiKey: z.string().trim().min(1).max(4096),
   baseUrl: z.url().default('https://api.deepseek.com'),
+  protocol: z.enum(['auto', 'chat', 'responses']).default('auto'),
   model: z.string().trim().min(1).max(120).default('deepseek-chat'),
   provider: z.string().max(60).optional()
 });
@@ -50,12 +51,38 @@ export interface DesktopAPI {
   load(): Promise<WorkbenchSnapshot | null>;
   save(snapshot: WorkbenchSnapshot): Promise<void>;
   polish(payload: unknown): Promise<{ text: string; model: string; provider: string }>;
+  providerModels(payload: unknown): Promise<{ models: string[]; endpoint: string }>;
+  providerDiagnose(payload: unknown): Promise<ProviderDiagnosis>;
   integration(payload: unknown): Promise<IntegrationResult>;
   exportFile(payload: unknown): Promise<{ saved: boolean }>;
   backup(): Promise<{ saved: boolean }>;
   importDocument(payload: unknown): Promise<{ assetId: string; text: string; warnings: string[] }>;
   analyzeDocument(payload: unknown): Promise<DocumentAnalysis>;
   exportOriginal(payload: unknown): Promise<{ saved: boolean }>;
+}
+
+export const providerSchema = z.object({
+  baseUrl: z.string().trim().min(1).max(2048),
+  apiKey: z.string().trim().min(1).max(4096),
+  model: z.string().trim().max(120).default(''),
+  protocol: z.enum(['auto', 'chat', 'responses']).default('auto')
+});
+export type ProviderConfig = z.infer<typeof providerSchema>;
+export interface ProviderCheck {
+  name: string;
+  status: 'pass' | 'fail' | 'warn';
+  detail: string;
+  endpoint?: string;
+  httpStatus?: number;
+  durationMs?: number;
+}
+export interface ProviderDiagnosis {
+  ok: boolean;
+  checks: ProviderCheck[];
+  models: string[];
+  model: string;
+  protocol?: 'chat' | 'responses';
+  suggestion: string;
 }
 
 export const documentInputSchema = z.object({

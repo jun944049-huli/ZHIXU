@@ -1,4 +1,5 @@
 import { analyzeDocumentSchema, documentAnalysisSchema, type DocumentAnalysis } from '../shared/contracts';
+import { providerText, redactProviderText } from './providers';
 
 type AnalysisInput = ReturnType<typeof analyzeDocumentSchema.parse>;
 
@@ -39,20 +40,7 @@ function localAnalysis(input: AnalysisInput): DocumentAnalysis {
 
 async function analyzeChunk(input: AnalysisInput, text: string) {
   const provider = input.provider!;
-  const url = new URL(provider.baseUrl);
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) {
-    throw new Error('API 地址须为 HTTP 或 HTTPS，且不能包含账户信息');
-  }
-  url.pathname = url.pathname.replace(/\/+$/, '');
-  if (!url.pathname.endsWith('/chat/completions')) url.pathname += '/chat/completions';
-  url.search = '';
-  url.hash = '';
-  const response = await fetch(url, {
-    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(60000),
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.apiKey}` },
-    body: JSON.stringify({
-      model: provider.model, temperature: 0.1, max_tokens: 6500,
-      messages: [
+  const result = await providerText(provider, [
         { role: 'system', content: `你是项目文档分析助手。只输出 JSON 对象：
 {"summary":"摘要","projectId":null,"projectName":"建议项目名","tasks":[{"title":"任务","assignee":"","due":"","priority":"P2","estimateHours":0,"evidence":"原文逐字引文"}]}。
 最多提取80条可执行任务；不捏造负责人、日期、工时，缺失用空字符串或0。due仅用YYYY-MM-DD或空字符串。
@@ -64,17 +52,13 @@ evidence必须是本片段中逐字出现的原文，不超过1000字。不能�
           projects: input.projects, filename: input.name,
           untrustedDocument: text
         }) }
-      ]
-    })
-  });
-  if (!response.ok) throw new Error(`分析服务返回 HTTP ${response.status}`);
-  const responseText = await response.text();
-  if (responseText.length > 500000) throw new Error('分析响应过大');
-  const result = JSON.parse(responseText) as { choices?: { message?: { content?: string } }[] };
-  const content = result.choices?.[0]?.message?.content || '';
-  const parsed = documentAnalysisSchema.parse(JSON.parse(
-    content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
-  ));
+      ], { timeout: 60000, maxTokens: 6500 });
+  let parsed;
+  try {
+    parsed = documentAnalysisSchema.parse(JSON.parse(
+      result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+    ));
+  } catch { throw new Error('模型没有返回有效的任务拆解 JSON，请更换文本模型或重试。'); }
   // Only quoted, grounded actions can become task candidates.
   const tasks = parsed.tasks.filter(task => text.includes(task.evidence));
   return { ...parsed, tasks, omitted: parsed.tasks.length - tasks.length };
@@ -108,7 +92,8 @@ export async function analyzeDocument(value: unknown): Promise<DocumentAnalysis>
         ...(chunks.length > 1 ? [`已分 ${chunks.length} 段分析全文。`] : [])
       ]
     };
-  } catch {
-    return { ...local, warnings: ['AI 分析未完成，已使用本地规则；可在配置检查后重新分析。', ...local.warnings] };
+  } catch (error) {
+    const reason = redactProviderText(error instanceof Error ? error.message : '分析响应无效', input.provider.apiKey);
+    return { ...local, warnings: [`AI 分析未完成：${reason} 原文件已保存，已使用本地规则；可在设置中诊断供应商后重新分析。`, ...local.warnings] };
   }
 }

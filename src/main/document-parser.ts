@@ -23,7 +23,13 @@ export async function parseDocument(value: unknown): Promise<{ text: string; war
   const warnings: string[] = [];
   try {
     if (['txt', 'md', 'csv'].includes(extension)) {
-      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      const encoding = bytes[0] === 0xff && bytes[1] === 0xfe ? 'utf-16le' :
+        bytes[0] === 0xfe && bytes[1] === 0xff ? 'utf-16be' : 'utf-8';
+      try { text = new TextDecoder(encoding, { fatal: true }).decode(bytes); }
+      catch {
+        text = new TextDecoder('gb18030', { fatal: true }).decode(bytes);
+        warnings.push('文本使用 GB18030 编码读取，请核对中文及特殊字符。');
+      }
       if (text.includes('\0')) throw new Error('BINARY_TEXT');
     } else if (extension === 'doc') {
       if (Buffer.from(bytes).subarray(0, 8).toString('hex') !== 'd0cf11e0a1b11ae1') throw new Error('CORRUPT_DOC');
@@ -33,6 +39,9 @@ export async function parseDocument(value: unknown): Promise<{ text: string; war
       const doc = await new WordExtractor().extract(Buffer.from(bytes));
       text = [doc.getBody(), doc.getHeaders(), doc.getFootnotes()].filter(Boolean).join('\n');
     } else {
+      const buffer = Buffer.from(bytes);
+      if (extension === 'pdf' ? !buffer.subarray(0, 1024).includes(Buffer.from('%PDF-')) :
+        buffer.readUInt16LE(0) !== 0x4b50) throw new Error('FILE_TYPE_MISMATCH');
       const ast = await OfficeParser.parseOffice(Buffer.from(bytes), {
         fileType: extension as 'docx' | 'xlsx' | 'pptx' | 'pdf',
         extractAttachments: false, ocr: false, ignoreSlideMasters: true,
@@ -60,7 +69,11 @@ export async function parseDocument(value: unknown): Promise<{ text: string; war
     if (/PARTIAL_DOCUMENT/.test(message)) throw new Error('文档超出解析限制或部分页面无法读取，请拆分后上传');
     if (/NO_PDF_TEXT/.test(message)) throw new Error('PDF 没有可读文本层，请先 OCR 后上传');
     if (/PASSWORD|encrypted|password/i.test(message)) throw new Error('文件已加密，请先去除密码后上传');
-    throw new Error('文件无法解析，请检查是否损坏或另存为标准格式；文本文件须使用 UTF-8');
+    if (/FILE_TYPE_MISMATCH|CORRUPT_DOC/.test(message)) throw new Error('文件无法解析：扩展名与文件内容不匹配或文件损坏，请在原软件中“另存为”标准格式，勿直接改后缀');
+    if (/BINARY_TEXT|encoded data|encoding/i.test(message)) throw new Error('文本编码无法识别或含二进制内容，请另存为 UTF-8 文本后上传');
+    if (/timeout|abort|time.?limit/i.test(message)) throw new Error('文档解析超时，请拆分较大的页面、工作表或幻灯片后重试');
+    if (/limit|maximum|too many|too large|memory/i.test(message)) throw new Error('文档解压或内容规模超出限制，请拆分后上传');
+    throw new Error(`${extension.toUpperCase()} 文件无法解析：文件结构损坏或格式不兼容，请在原软件中重新另存后上传`);
   }
   text = text.replace(/\r\n?/g, '\n').trim();
   if (!text || !text.replace(/\[(?:第 \d+ 页|幻灯片 \d+|工作表 \d+)\]/g, '').trim()) {

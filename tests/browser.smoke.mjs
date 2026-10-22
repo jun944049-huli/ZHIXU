@@ -115,6 +115,40 @@ try {
       'document editor: ' + JSON.stringify(dimensions));
     await page.screenshot({ path: resolve(evidence, `browser-document-${width}.png`) });
   }
+  await page.locator('#modal-root [data-action="close-modal"]').first().click();
+  await page.evaluate(() => {
+    // Layout uses an isolated fake bridge; real requests are verified by the desktop audit.
+    window.xiaoyuDesktop = {
+      providerModels: async () => ({ models: ['image-model', 'text-model-with-a-long-provider-name'], endpoint: 'http://127.0.0.1/v1/models' }),
+      providerDiagnose: async () => ({ ok: false, models: ['text-model-with-a-long-provider-name'],
+        model: 'text-model-with-a-long-provider-name',
+        checks: [{ name: '配置完整性', status: 'pass', detail: '地址与密钥已填写。' },
+          { name: '模型列表', status: 'pass', detail: '已获取模型。', endpoint: 'http://127.0.0.1:12345/v1/models' },
+          { name: '真实请求', status: 'fail', detail: 'HTTP 403：模型无权限。上游说明：model access denied; request-id=layout-test-long-response',
+            endpoint: 'http://127.0.0.1:12345/compatible-gateway/v1/responses', durationMs: 183 }],
+        suggestion: '检查当前密钥的模型授权和网关限制，输入内容已保留。' })
+    };
+  });
+  await page.locator('[data-action="profile-settings"]').first().click();
+  await page.locator('#custom-provider-base').fill('http://127.0.0.1:12345');
+  await page.locator('#custom-provider-key').fill('layout-test-only');
+  await page.waitForFunction(() => document.getElementById('custom-provider-model').value.includes('text-model'));
+  await page.locator('[data-action="test-custom-provider"]').click();
+  await page.locator('.provider-check.fail').waitFor();
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.locator('#custom-provider-diagnosis').scrollIntoViewIfNeeded();
+    await finishAnimations();
+    const dimensions = await page.locator('.profile-modal').evaluate(element => ({
+      left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right,
+      bodyWidth: element.querySelector('.modal-body').clientWidth,
+      bodyScroll: element.querySelector('.modal-body').scrollWidth
+    }));
+    assert.ok(dimensions.left >= 0 && dimensions.right <= width && dimensions.bodyScroll <= dimensions.bodyWidth + 1,
+      'provider configuration: ' + JSON.stringify(dimensions));
+    await page.screenshot({ path: resolve(evidence, `browser-provider-${width}.png`) });
+  }
+  await page.evaluate(() => { delete window.xiaoyuDesktop; });
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: true, projectId, overflow }));
 } finally {

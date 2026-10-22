@@ -2160,6 +2160,34 @@ h3 { font-size: 13px; font-weight: 650; }
 .profile-modal .modal-body { padding: 16px 22px; }
 .profile-modal .form-grid { gap: 11px 14px; }
 .profile-modal .profile-preview { margin-bottom: 12px; }
+.custom-provider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.custom-provider-grid .full { grid-column: 1 / -1; }
+.custom-provider-box { min-width: 0; }
+.custom-provider-head, .provider-model-controls { display: flex; align-items: center; gap: 8px; }
+.custom-provider-head { justify-content: space-between; flex-wrap: wrap; }
+.provider-model-controls .select { flex: 1; min-width: 0; width: 100%; }
+.provider-model-controls .btn { flex-shrink: 0; }
+.custom-provider-grid .field { min-width: 0; }
+.custom-provider-grid .input, .custom-provider-grid .select { width: 100%; min-width: 0; }
+.custom-provider-detected { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.custom-provider-box > .btn { margin-top: 10px; }
+.provider-diagnosis { display: flex; flex-direction: column; gap: 0; margin-top: 10px; }
+.provider-check { padding: 12px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.provider-check b { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.provider-check b span { margin-left: auto; font-size: 11px; font-weight: 500; }
+.provider-check.pass b { color: var(--green); }
+.provider-check.fail b, .document-import-result.failed b { color: var(--red); }
+.provider-check p, .document-import-result p { margin: 6px 0 0; font-size: 12px; line-height: 1.6; }
+.provider-check small, .provider-endpoint { color: var(--ink-3); }
+.document-import-results { display: grid; gap: 0; }
+.document-import-result { padding: 12px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.document-import-result b { font-size: 13px; }
+.document-import-result .btn { margin-top: 8px; }
+@media (max-width: 680px) {
+  .custom-provider-grid { grid-template-columns: minmax(0, 1fr); }
+  .profile-modal .modal-body { padding: 14px; }
+  .custom-provider-head .chip { white-space: normal; }
+}
 
 .profile-preview {
   display: flex;

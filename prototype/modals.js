@@ -112,6 +112,11 @@ function openProfileSettings() {
   const detected = custom.detected || detectAIProvider(custom.baseUrl, custom.model);
   state.profileDraft = { color: u.color, assistantName: assistantName(), customProviderActive: activeProvider === 'custom' };
   state.customProviderTested = false;
+  state.customProviderFingerprint = '';
+  state.customProviderModels = custom.model ? [custom.model] : [];
+  state.customProviderAutoModel = custom.model || '';
+  state.customProviderSession = {};
+  clearTimeout(state.customProviderFetchTimer);
   const root = document.getElementById('modal-root');
   root.innerHTML = `
     <div class="modal-backdrop" data-action="backdrop">
@@ -193,8 +198,11 @@ function openProfileSettings() {
                   <input class="input" id="custom-provider-name" value="${esc(custom.name || '')}" placeholder="自动识别" maxlength="30">
                 </div>
                 <div class="field">
-                  <label>模型</label>
-                  <input class="input" id="custom-provider-model" value="${esc(custom.model || '')}" placeholder="例如 gpt-4o-mini" maxlength="80" autocomplete="off" spellcheck="false">
+                  <label for="custom-provider-protocol">接入协议</label>
+                  <select class="select" id="custom-provider-protocol">
+                    ${[['auto', '自动识别'], ['chat', 'Chat Completions'], ['responses', 'Responses API']].map(([value, label]) =>
+                      `<option value="${value}" ${value === (custom.protocol || 'auto') ? 'selected' : ''}>${label}</option>`).join('')}
+                  </select>
                 </div>
                 <div class="field full">
                   <label>API Base URL</label>
@@ -204,15 +212,26 @@ function openProfileSettings() {
                   <label>API Key</label>
                   <div class="row gap-6">
                     <input class="input" id="custom-provider-key" type="password" value="${esc(custom.apiKey || '')}" placeholder="sk-..." autocomplete="off" spellcheck="false" style="flex:1">
-                    <button class="btn btn-sm" data-action="test-custom-provider">${icon('zap', 11)} 测试连接</button>
                   </div>
+                </div>
+                <div class="field full">
+                  <label for="custom-provider-model-select">可用模型</label>
+                  <div class="provider-model-controls">
+                    <select class="select" id="custom-provider-model-select"><option value="">填写地址与密钥后自动获取</option>
+                      ${custom.model ? `<option value="${esc(custom.model)}" selected>${esc(custom.model)}</option>` : ''}</select>
+                    <button class="btn btn-sm" data-action="fetch-custom-models">${icon('refresh', 12)} 获取模型</button>
+                  </div>
+                  <label class="tiny muted" for="custom-provider-model">当前模型 / 手动填写</label>
+                  <input class="input" id="custom-provider-model" value="${esc(custom.model || '')}" placeholder="自动选取文本模型，也可手动填写" maxlength="120" autocomplete="off" spellcheck="false">
                 </div>
               </div>
               <div class="custom-provider-detected">
                 <span class="tiny muted">识别结果</span>
                 <span class="chip outline" id="custom-provider-detected">${esc(detected || '等待输入')}</span>
               </div>
-              <div class="hint" id="custom-provider-result">支持 OpenAI 兼容接口；填写完整并保存后，会同步到对话与首页。清空自定义供应商即可切回 DeepSeek。</div>
+              <div class="hint" id="custom-provider-result" role="status" aria-live="polite">填入 API 地址与密钥后自动获取模型。诊断会向当前供应商发送一条简短测试请求，可能产生少量费用。</div>
+              <button class="btn btn-sm" data-action="test-custom-provider">${icon('zap', 12)} 诊断供应商</button>
+              <div id="custom-provider-diagnosis" class="provider-diagnosis" aria-live="polite"></div>
             </div>
           </div>
         </div>
@@ -238,7 +257,7 @@ function setAvatarColor(color) {
   if (av) av.style.background = color;
 }
 
-function saveProfile() {
+async function saveProfile() {
   const nameEl = document.getElementById('profile-name');
   const roleEl = document.getElementById('profile-role');
   const iniEl = document.getElementById('profile-initials');
@@ -259,9 +278,18 @@ function saveProfile() {
   const assistant = ((assistantEl && assistantEl.value.trim()) || '小鱼').slice(0, 12);
   const deepseek = deepseekEl ? deepseekEl.value.trim() : String((DB.settings && DB.settings.deepseekKey) || '');
   const customName = customNameEl ? customNameEl.value.trim() : '';
-  const customModel = customModelEl ? customModelEl.value.trim() : '';
+  let customModel = customModelEl ? customModelEl.value.trim() : '';
   const customBase = customBaseEl ? customBaseEl.value.trim().replace(/\/+$/, '') : '';
   const customKey = customKeyEl ? customKeyEl.value.trim() : '';
+  if (customBase && customKey && !customModel) {
+    await fetchCustomProviderModels();
+    customModel = customModelEl ? customModelEl.value.trim() : '';
+    if (document.getElementById('profile-name') !== nameEl) return;
+    if (customBaseEl.value.trim().replace(/\/+$/, '') !== customBase || customKeyEl.value.trim() !== customKey) {
+      showToast('供应商配置已改变，请重新保存');
+      return;
+    }
+  }
   const customHasAny = !!(customName || customModel || customBase || customKey);
 
   if (customHasAny && !(customBase && customKey && customModel)) {
@@ -286,10 +314,11 @@ function saveProfile() {
       baseUrl: customBase,
       apiKey: customKey,
       model: customModel,
+      protocol: document.getElementById('custom-provider-protocol')?.value || 'auto',
       detected,
-      testedAt: state.customProviderTested
+      testedAt: state.customProviderTested && state.customProviderFingerprint === customProviderFingerprint()
         ? new Date().toISOString()
-        : ((DB.settings.customProvider && DB.settings.customProvider.testedAt) || '')
+        : ''
     };
     DB.settings.aiProvider = 'custom';
     state.chatModel = resolvedName;
@@ -356,59 +385,123 @@ function updateCustomProviderDetection() {
   if (nameEl && !nameEl.value.trim()) nameEl.placeholder = detected || '自动识别';
 }
 
-async function testCustomProvider() {
-  const nameEl = document.getElementById('custom-provider-name');
-  const baseEl = document.getElementById('custom-provider-base');
-  const keyEl = document.getElementById('custom-provider-key');
-  const modelEl = document.getElementById('custom-provider-model');
-  const hint = document.getElementById('custom-provider-result');
+function customProviderForm() {
+  return { baseUrl: document.getElementById('custom-provider-base')?.value.trim().replace(/\/+$/, '') || '',
+    apiKey: document.getElementById('custom-provider-key')?.value.trim() || '',
+    model: document.getElementById('custom-provider-model')?.value.trim() || '',
+    protocol: document.getElementById('custom-provider-protocol')?.value || 'auto' };
+}
+
+function customProviderFingerprint() { return JSON.stringify(customProviderForm()); }
+
+function invalidateCustomProvider(id) {
+  state.customProviderTested = false;
+  state.customProviderFingerprint = '';
+  const panel = document.getElementById('custom-provider-diagnosis');
+  if (panel) panel.innerHTML = '';
   const current = document.getElementById('custom-provider-current');
-  const baseUrl = baseEl ? baseEl.value.trim().replace(/\/+$/, '') : '';
-  const key = keyEl ? keyEl.value.trim() : '';
-  const model = modelEl ? modelEl.value.trim() : '';
-  const detected = detectAIProvider(baseUrl, model);
-  const provider = (nameEl && nameEl.value.trim()) || detected;
-
-  if (!baseUrl || !key || !model) {
-    if (hint) hint.textContent = '请先填写 API Base URL、API Key 和模型名称。';
-    showToast('自定义供应商信息不完整');
-    return;
+  if (current) { current.className = 'chip outline'; current.textContent = '配置已修改，待诊断'; }
+  const select = document.getElementById('custom-provider-model-select');
+  if (id === 'custom-provider-model') {
+    state.customProviderAutoModel = '';
+    if (select) select.value = customProviderForm().model;
   }
-
-  if (hint) hint.textContent = `正在连接 ${provider}…`;
-  try {
-    const res = await requestPolish({
-        text: '测试连接',
-        tone: '简洁',
-        apiKey: key,
-        baseUrl,
-        model,
-        provider
-    });
-    let data = null;
-    try { data = await res.json(); } catch (err) { /* static server may return HTML */ }
-    if (!res.ok) {
-      if (res.status === 404 || res.status === 501) {
-        throw new Error('未启动代理，请用 python server.py 启动预览');
+  if (['custom-provider-base', 'custom-provider-key'].includes(id)) {
+    const model = document.getElementById('custom-provider-model');
+    if (model && model.value === state.customProviderAutoModel) model.value = '';
+    state.customProviderAutoModel = '';
+    state.customProviderModels = [];
+    if (select) select.innerHTML = '<option value="">等待获取模型</option>';
+    clearTimeout(state.customProviderFetchTimer);
+    const session = state.customProviderSession;
+    state.customProviderFetchTimer = setTimeout(() => {
+      if (session === state.customProviderSession && document.getElementById('custom-provider-key')) {
+        const config = customProviderForm();
+        if (config.baseUrl && config.apiKey) void fetchCustomProviderModels();
       }
-      throw new Error((data && (data.message || data.error)) || `HTTP ${res.status}`);
-    }
-    state.customProviderTested = true;
-    state.customProviderActive = true;
-    if (nameEl && !nameEl.value.trim()) nameEl.value = detected;
-    updateCustomProviderDetection();
-    if (current) {
-      current.className = 'chip green';
-      current.textContent = '待保存';
-    }
-    if (hint) hint.textContent = `连接成功 · 识别为 ${detected} · ${data.model || model}。保存后同步到对话与首页。`;
-    showToast(`${detected} 连接成功`);
-  } catch (err) {
-    state.customProviderTested = false;
-    state.customProviderActive = false;
-    if (hint) hint.textContent = '连接失败：' + ((err && err.message) || '未知错误');
-    showToast(`${provider} 连接失败`);
+    }, 1000);
   }
+}
+
+function fillCustomProviderModels(models) {
+  const input = document.getElementById('custom-provider-model');
+  const select = document.getElementById('custom-provider-model-select');
+  if (!input || !select) return;
+  state.customProviderModels = models;
+  if (!input.value.trim()) {
+    input.value = models.find(model => !/embed|rerank|whisper|tts|image|dall-e|moderation|audio|video/i.test(model)) || '';
+    state.customProviderAutoModel = input.value;
+  }
+  select.innerHTML = '<option value="">手动填写模型</option>' + models.map(model =>
+    `<option value="${esc(model)}">${esc(model)}</option>`).join('');
+  select.value = models.includes(input.value) ? input.value : '';
+  updateCustomProviderDetection();
+}
+
+async function fetchCustomProviderModels() {
+  clearTimeout(state.customProviderFetchTimer);
+  const config = customProviderForm();
+  const hint = document.getElementById('custom-provider-result');
+  const session = state.customProviderSession;
+  const requestId = state.customProviderModelsRequest = {};
+  if (!hint) return;
+  if (!config.baseUrl || !config.apiKey) { hint.textContent = '请填写 API 地址与 API Key。'; return; }
+  if (!window.xiaoyuDesktop?.providerModels) { hint.textContent = '模型自动获取与接口诊断请使用更新后的桌面版。'; return; }
+  hint.textContent = '正在从供应商获取模型列表…';
+  try {
+    const result = await window.xiaoyuDesktop.providerModels(config);
+    const now = customProviderForm();
+    if (state.customProviderSession !== session || !hint.isConnected || requestId !== state.customProviderModelsRequest ||
+        now.baseUrl !== config.baseUrl || now.apiKey !== config.apiKey) return;
+    fillCustomProviderModels(result.models);
+    hint.textContent = `已获取 ${result.models.length} 个模型${now.model && !result.models.includes(now.model) ? '；当前手填模型未在列表中，已保留，请诊断确认。' : '，可在列表中选择。'}`;
+  } catch (error) {
+    const now = customProviderForm();
+    if (state.customProviderSession !== session || !hint.isConnected || requestId !== state.customProviderModelsRequest ||
+        now.baseUrl !== config.baseUrl || now.apiKey !== config.apiKey) return;
+    hint.textContent = '模型获取失败：' + documentFailureReason(error) + '；可重试，或手动填写模型后诊断。';
+  }
+}
+
+async function testCustomProvider() {
+  clearTimeout(state.customProviderFetchTimer);
+  state.customProviderModelsRequest = {};
+  const config = customProviderForm();
+  const fingerprint = customProviderFingerprint();
+  const session = state.customProviderSession;
+  const hint = document.getElementById('custom-provider-result');
+  const panel = document.getElementById('custom-provider-diagnosis');
+  const button = document.querySelector('[data-action="test-custom-provider"]');
+  if (!hint || !panel || button?.disabled) return;
+  if (!window.xiaoyuDesktop?.providerDiagnose) { hint.textContent = '接口诊断请使用更新后的桌面版。'; return; }
+  state.customProviderTested = false;
+  hint.textContent = '正在检查配置、模型列表与真实文本请求…';
+  panel.innerHTML = '';
+  if (button) button.disabled = true;
+  try {
+    const report = await window.xiaoyuDesktop.providerDiagnose(config);
+    if (session !== state.customProviderSession || !panel.isConnected || fingerprint !== customProviderFingerprint()) return;
+    if (report.models.length) fillCustomProviderModels(report.models);
+    if (report.model && !document.getElementById('custom-provider-model').value) {
+      document.getElementById('custom-provider-model').value = report.model;
+    }
+    if (report.ok && report.protocol) document.getElementById('custom-provider-protocol').value = report.protocol;
+    state.customProviderTested = report.ok;
+    state.customProviderFingerprint = report.ok ? customProviderFingerprint() : '';
+    panel.innerHTML = [...report.checks, { name: '处理建议', status: report.ok ? 'pass' : 'warn', detail: report.suggestion }]
+      .map(check => `<div class="provider-check ${check.status}">
+        <b>${icon(check.status === 'pass' ? 'check' : check.status === 'fail' ? 'x' : 'alert', 14)} ${esc(check.name)}
+          <span>${check.status === 'pass' ? '通过' : check.status === 'fail' ? '失败' : '需留意'}</span></b>
+        ${check.endpoint ? `<p class="provider-endpoint">${esc(check.endpoint)}</p>` : ''}
+        <p>${esc(check.detail)}</p>${check.durationMs != null ? `<small>${check.durationMs} ms</small>` : ''}</div>`).join('');
+    hint.textContent = report.ok ? '真实请求通过；保存后使用此配置。' : '诊断未通过；输入内容已保留，请按以下原因修正。';
+    const current = document.getElementById('custom-provider-current');
+    if (current) { current.className = 'chip ' + (report.ok ? 'green' : 'outline'); current.textContent = report.ok ? '已验证，待保存' : '诊断失败'; }
+  } catch (error) {
+    if (session === state.customProviderSession && panel.isConnected && fingerprint === customProviderFingerprint()) {
+      hint.textContent = '诊断失败：' + documentFailureReason(error);
+    }
+  } finally { if (button?.isConnected) button.disabled = false; }
 }
 
 function workflowRuleRows(rules) {

@@ -42,6 +42,18 @@ test('invalid, oversized and empty files fail without a fake analysis', async ()
   ]) await assert.rejects(parseDocument(input));
 });
 
+test('UTF-16 and common Chinese CSV encoding are readable and wrong extensions are explained', async () => {
+  const unicode = await parseDocument({ name: '中文.csv', bytes: Buffer.concat([
+    Buffer.from([0xff, 0xfe]), Buffer.from('完成中文资料核对', 'utf16le')
+  ]) });
+  assert.equal(unicode.text, '完成中文资料核对');
+  const legacy = await parseDocument({ name: '旧表格.csv', bytes: Buffer.from([0xd6, 0xd0, 0xce, 0xc4]) });
+  assert.equal(legacy.text, '中文');
+  assert.match(legacy.warnings[0], /GB18030/);
+  await assert.rejects(parseDocument({ name: '错误后缀.docx', bytes: Buffer.from('a Word-looking plain text') }),
+    /扩展名与文件内容不匹配/);
+});
+
 test('original attachments persist exactly, reuse content identity and reject arbitrary paths', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'xiaoyu-files-'));
   try {

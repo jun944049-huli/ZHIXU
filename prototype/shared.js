@@ -143,6 +143,7 @@ function aiProviderConfig() {
       baseUrl: String(custom.baseUrl || '').replace(/\/+$/, ''),
       apiKey: String(custom.apiKey || ''),
       model: String(custom.model || ''),
+      protocol: custom.protocol || 'auto',
       detected: custom.detected || ''
     };
   }

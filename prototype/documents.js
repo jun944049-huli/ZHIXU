@@ -9,6 +9,7 @@ function documentEngineChoices() {
 }
 
 function openDocumentImport(target = 'chat') {
+  state.documentImportResults = new Map();
   state.importTarget = target;
   state.importProjectId = target === 'project' ? projectById(state.projectId)?.id || '' :
     projectById(state.chatContext)?.id || '';
@@ -23,7 +24,8 @@ function openDocumentImport(target = 'chat') {
       : '浏览器预览支持文本；Word、Excel、PDF 和 PPTX 请使用桌面版。'}</p>
     <p class="small muted mt-12">已有项目自动归档并生成任务；新项目等待明确确认。扫描 PDF 如无文本层，需要先进行 OCR。</p>
     <p class="small muted mt-12">选择 AI 时，正文会发送到已配置的供应商；本地规则只提取行动语句，自定义分析指令由 AI 处理。</p>
-    <div id="document-import-status" class="small mt-12" role="status" aria-live="polite"></div>`,
+    <div id="document-import-status" class="small mt-12" role="status" aria-live="polite"></div>
+    <div id="document-import-results" class="document-import-results"></div>`,
     `<button class="btn" data-action="document-library">${icon('file', 13)} 附件记录 · 待确认 ${DB.documents.filter(d => !d.projectId).length}</button>
     <button class="btn btn-primary" data-action="document-import">${icon('upload', 13)} 上传并分析</button>`, 'document-import-modal');
 }
@@ -33,7 +35,8 @@ async function analyzeImportedDocument(doc) {
   const input = { text: doc.content, name: doc.title, today: DB.meta.today,
     instructions: doc.instructions, projects: DB.projects.map(p => ({ id: p.id, name: p.name })) };
   if (doc.analysisEngine !== 'local' && provider.id !== 'local') input.provider = {
-    apiKey: provider.apiKey, baseUrl: provider.baseUrl, model: provider.model, provider: provider.name
+    apiKey: provider.apiKey, baseUrl: provider.baseUrl, model: provider.model, provider: provider.name,
+    protocol: provider.protocol || 'auto'
   };
   if (window.xiaoyuDesktop?.analyzeDocument) return window.xiaoyuDesktop.analyzeDocument(input);
   const matches = DB.projects.filter(p => (doc.title + '\n' + doc.content).includes(p.name));
@@ -51,7 +54,8 @@ async function analyzeImportedDocument(doc) {
 
 async function importDocuments() {
   if (state.documentImportBusy) return;
-  const files = [...(document.getElementById('text-file')?.files || [])];
+  const fileInput = document.getElementById('text-file');
+  const files = [...(fileInput?.files || [])];
   if (!files.length || files.length > 10) { showToast('请一次选择 1 至 10 个文件'); return; }
   const projectId = fieldValue('import-project');
   if (projectId && !projectById(projectId)) { showToast('所选项目已不存在，请重新选择'); return; }
@@ -59,17 +63,25 @@ async function importDocuments() {
   const analysisEngine = fieldValue('document-engine') || 'local';
   DB.documentInstructions = instructions;
   state.documentImportBusy = true;
+  const results = state.documentImportResults ||= new Map();
   const button = document.querySelector('[data-action="document-import"]');
   if (button) button.disabled = true;
+  const controls = ['text-file', 'import-project', 'document-engine', 'document-instructions']
+    .map(id => document.getElementById(id)).filter(Boolean);
+  controls.forEach(control => { control.disabled = true; });
   const imported = [], failures = [];
   try {
     for (const [index, file] of files.entries()) {
+      const previous = results.get(file);
+      if (previous?.id && documentById(previous.id)) { imported.push(previous.id); continue; }
       const status = document.getElementById('document-import-status');
-      if (status) status.textContent = `正在解析和分析 ${index + 1}/${files.length}：${file.name}`;
+      if (document.getElementById('text-file') === fileInput && status) {
+        status.textContent = `正在解析和分析 ${index + 1}/${files.length}：${file.name}`;
+      }
       try {
-        if (!/\.(doc|docx|xlsx|pdf|pptx|txt|md|csv)$/i.test(file.name) || file.size > 20 * 1024 * 1024 || !file.size) {
-          throw new Error('格式不支持或文件超过 20 MB');
-        }
+        if (!/\.(doc|docx|xlsx|pdf|pptx|txt|md|csv)$/i.test(file.name)) throw new Error('格式不支持；旧版 XLS、PPT 请另存为 XLSX、PPTX');
+        if (!file.size) throw new Error('文件为空，请选择包含正文的文件');
+        if (file.size > 20 * 1024 * 1024) throw new Error('文件超过 20 MB，请压缩或拆分后上传');
         let parsed;
         if (window.xiaoyuDesktop?.importDocument) {
           parsed = await window.xiaoyuDesktop.importDocument({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
@@ -81,7 +93,11 @@ async function importDocuments() {
         }
         const existing = parsed.assetId && DB.documents.find(doc => doc.assetId === parsed.assetId &&
           (!projectId || doc.projectId === projectId));
-        if (existing) { imported.push(existing.id); continue; }
+        if (existing) {
+          imported.push(existing.id);
+          results.set(file, { id: existing.id, status: 'saved', reason: '已存在于附件记录，未重复导入' });
+          continue;
+        }
         if (DB.documents.reduce((sum, doc) => sum + doc.content.length, 0) + parsed.text.length > 1500000) {
           throw new Error('本机文档正文总量已达上限，请先导出整理');
         }
@@ -89,7 +105,11 @@ async function importDocuments() {
           assetId: parsed.assetId || null, warnings: parsed.warnings || [], createdAt: new Date().toISOString(), instructions, analysisEngine };
         // Save the source before a remote analysis; a network failure must not lose the upload.
         DB.documents.push(doc);
-        await persistWorkbench();
+        try { await persistWorkbench(); }
+        catch (error) {
+          DB.documents.splice(DB.documents.indexOf(doc), 1);
+          throw new Error('本地记录保存失败：' + documentFailureReason(error));
+        }
         imported.push(doc.id);
         try {
           doc.analysis = await analyzeImportedDocument(doc);
@@ -97,22 +117,48 @@ async function importDocuments() {
           const matched = projectId || doc.analysis.projectId;
           if (matched && projectById(matched)) await applyDocumentToProject(doc, matched);
           else await persistWorkbench();
-        } catch {
-          doc.warnings.push('自动分析未完成，原文已保存；可以重新分析。');
-          await persistWorkbench();
+        } catch (error) {
+          doc.warnings.push('自动分析未完成，原文件已保存：' + documentFailureReason(error));
+          try { await persistWorkbench(); }
+          catch { doc.warnings.push('分析结果暂未写入数据库，请检查磁盘空间后重试保存。'); }
         }
-      } catch (error) { failures.push(`${file.name}：${error.message || '导入失败'}`); }
+        const warning = [...(doc.warnings || []), ...(doc.analysis?.warnings || [])]
+          .find(message => /未完成|失败|暂未/.test(message));
+        results.set(file, { id: doc.id, status: 'saved', reason: warning || '原文件与正文已保存' });
+      } catch (error) {
+        const reason = documentFailureReason(error);
+        failures.push(`${file.name}：${reason}`);
+        results.set(file, { status: 'failed', reason });
+      }
     }
     render();
-    if (document.getElementById('document-import-status')) {
-      if (imported.length === 1 && !failures.length) openDocumentEditor(imported[0]);
-      else openDocumentLibrary(failures);
+    if (document.getElementById('text-file') === fileInput) {
+      if (failures.length) {
+        document.getElementById('document-import-status').textContent =
+          `已保存 ${imported.length} 个，失败 ${failures.length} 个。所选文件已保留，可重试失败文件。`;
+        document.getElementById('document-import-results').innerHTML = files.map(file => {
+          const result = results.get(file);
+          return `<div class="document-import-result ${result.status === 'failed' ? 'failed' : 'saved'}">
+            <b>${esc(file.name)} · ${result.status === 'failed' ? '上传失败' : '已保存'}</b>
+            <p>${esc(result.reason)}</p>${result.id ? `<button class="btn btn-sm" data-action="document-open"
+              data-id="${esc(result.id)}">查看与修改</button>` : ''}</div>`;
+        }).join('');
+        if (button) button.textContent = '重试失败文件';
+      } else if (imported.length === 1) openDocumentEditor(imported[0]);
+      else openDocumentLibrary();
     }
     showToast(`已保存 ${imported.length} 个附件${failures.length ? `，${failures.length} 个失败` : ''}`);
   } finally {
     state.documentImportBusy = false;
     if (button?.isConnected) button.disabled = false;
+    controls.forEach(control => { if (control.isConnected) control.disabled = false; });
   }
+}
+
+function documentFailureReason(error) {
+  return String(error?.message || '导入失败，请重试')
+    .replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, '')
+    .slice(0, 1200);
 }
 
 function openDocumentLibrary(errors = []) {

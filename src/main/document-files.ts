@@ -10,7 +10,7 @@ export async function parseInWorker(payload: unknown) {
     const worker = new Worker(join(import.meta.dirname, 'document-worker.js'), {
       workerData: payload, resourceLimits: { maxOldGenerationSizeMb: 512 }
     });
-    const timer = setTimeout(() => { void worker.terminate(); reject(new Error('解析超过 75 秒，请拆分文件后重试')); }, 75000);
+    const timer = setTimeout(() => { settled = true; void worker.terminate(); reject(new Error('解析超过 75 秒，请拆分文件后重试')); }, 75000);
     const finish = () => { clearTimeout(timer); void worker.terminate(); };
     worker.once('message', message => {
       settled = true;
@@ -18,7 +18,14 @@ export async function parseInWorker(payload: unknown) {
       if (message.error) reject(new Error(message.error));
       else resolve(message.result);
     });
-    worker.once('error', () => { finish(); reject(new Error('文档解析进程失败，请拆分文件或另存后重试')); });
+    worker.once('error', error => {
+      settled = true;
+      finish();
+      const code = (error as NodeJS.ErrnoException).code || '';
+      reject(new Error(code === 'ERR_WORKER_OUT_OF_MEMORY' ? '文档解析内存不足，请拆分文件后重试' :
+        /MODULE_NOT_FOUND/.test(code) ? '桌面版本缺少文档解析组件，请更新当前小鱼程序后重试' :
+          '文档解析进程启动或运行失败，请重新打开当前小鱼程序后重试；仍失败时请将文件另存为标准格式'));
+    });
     worker.once('exit', code => {
       clearTimeout(timer);
       if (!settled) reject(new Error(`文档解析已停止（${code}），请拆分文件后重试`));
@@ -35,9 +42,16 @@ export class DocumentFiles {
     const bytes = Buffer.from(payload.bytes);
     const assetId = createHash('sha256').update(bytes).digest('hex') + extname(payload.name).toLowerCase();
     this.path(assetId);
-    await mkdir(this.directory, { recursive: true });
-    try { await writeFile(this.path(assetId), bytes, { flag: 'wx' }); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    try {
+      await mkdir(this.directory, { recursive: true });
+      try { await writeFile(this.path(assetId), bytes, { flag: 'wx' }); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      throw new Error(code === 'ENOSPC' ? '原文件保存失败：磁盘空间不足，请释放空间后重试' :
+        code === 'EACCES' || code === 'EPERM' ? '原文件保存失败：附件目录无写入权限或被安全软件阻止' :
+          '原文件保存失败：附件目录不可写，请检查磁盘和目录权限后重试');
+    }
     return { ...parsed, assetId };
   }
 

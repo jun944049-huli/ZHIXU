@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { WorkbenchStore } from './database';
 import { polish } from './polish';
+import { providerDiagnose, providerModels } from './providers';
 import { runIntegration } from './integrations';
 import { exportBuffer, exportSchema, reportHTML } from './exports';
 import { DocumentFiles } from './document-files';
@@ -85,6 +86,14 @@ else {
     ipcMain.handle('workbench:polish', (event, payload: unknown) => {
       checkSender(event);
       return polish(payload);
+    });
+    ipcMain.handle('workbench:provider-models', (event, payload: unknown) => {
+      checkSender(event);
+      return providerModels(payload);
+    });
+    ipcMain.handle('workbench:provider-diagnose', (event, payload: unknown) => {
+      checkSender(event);
+      return providerDiagnose(payload);
     });
     const documents = new DocumentFiles(join(dataDir, 'attachments'));
     let documentImportBusy = false;

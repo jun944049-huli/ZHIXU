@@ -232,6 +232,9 @@ function handleClick(e) {
     case 'test-custom-provider':
       testCustomProvider();
       break;
+    case 'fetch-custom-models':
+      fetchCustomProviderModels();
+      break;
     case 'avatar-color':
       setAvatarColor(el.dataset.color);
       break;
@@ -349,7 +352,8 @@ function handleInput(e) {
     refreshPolishPreview();
   }
 
-  if (['custom-provider-base', 'custom-provider-model', 'custom-provider-name'].includes(e.target.id)) {
+  if (['custom-provider-base', 'custom-provider-key', 'custom-provider-model', 'custom-provider-name'].includes(e.target.id)) {
+    invalidateCustomProvider(e.target.id);
     updateCustomProviderDetection();
   }
 }
@@ -401,6 +405,27 @@ function handleKeydown(e) {
 }
 
 function handleChange(e) {
+  if (e.target.id === 'text-file') {
+    state.documentImportResults = new Map();
+    const results = document.getElementById('document-import-results');
+    const status = document.getElementById('document-import-status');
+    if (results) results.innerHTML = '';
+    if (status) status.textContent = '';
+    const button = document.querySelector('[data-action="document-import"]');
+    if (button) button.textContent = '上传并分析';
+    return;
+  }
+  if (e.target.id === 'custom-provider-model-select') {
+    const input = document.getElementById('custom-provider-model');
+    if (input) input.value = e.target.value;
+    invalidateCustomProvider(e.target.id);
+    updateCustomProviderDetection();
+    return;
+  }
+  if (e.target.id === 'custom-provider-protocol') {
+    invalidateCustomProvider(e.target.id);
+    return;
+  }
   if (e.target.id === 'document-project') {
     const name = document.getElementById('document-project-name');
     if (name) name.disabled = e.target.value !== 'new';

@@ -636,6 +636,7 @@ async function requestAIPolish(text, tone, provider) {
         apiKey: cfg.apiKey,
         model: cfg.model,
         baseUrl: cfg.baseUrl,
+        protocol: cfg.protocol || 'auto',
         provider: cfg.name
     });
   } catch (err) {
