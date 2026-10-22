@@ -78,6 +78,24 @@ try {
       view + ': ' + JSON.stringify(dimensions));
     await page.screenshot({ path: resolve(evidence, `browser-mobile-${view}.png`), fullPage: true });
   }
+  await page.locator('.nav [data-view="inbox"]').click();
+  await page.evaluate(() => {
+    DB.inboxArchive.push({ id: 'browser-archive-check', title: '归档清空布局验收', deletedAt: new Date().toISOString() });
+  });
+  await page.locator('[data-action="inbox-archive"]').click();
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await finishAnimations();
+    const title = await page.locator('#modal-root h2').boundingBox();
+    const clear = await page.locator('[data-action="inbox-archive-clear"]').boundingBox();
+    const close = await page.locator('#modal-root [data-action="close-modal"]').boundingBox();
+    assert.ok(title.x + title.width <= clear.x && clear.x + clear.width <= close.x);
+    assert.ok(close.x + close.width <= width);
+    await page.screenshot({ path: resolve(evidence, `browser-archive-${width}.png`) });
+  }
+  await page.locator('[data-action="inbox-archive-clear"]').click();
+  await page.locator('#modal-root [data-action="inbox-archive"]').click();
+  assert.equal(await page.evaluate(() => DB.inboxArchive.some(i => i.id === 'browser-archive-check')), true);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: true, projectId, overflow }));
 } finally {

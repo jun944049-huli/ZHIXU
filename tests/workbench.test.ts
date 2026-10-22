@@ -230,6 +230,41 @@ test('timers switch cleanly and completing a timed task records the elapsed sess
   assert.equal(w.run('DB.timeEntries.length'), 2);
 });
 
+test('clearing archives requires confirmation and preserves active work and source deduplication', async () => {
+  const w = workbench();
+  w.fields['modal-root'] = { value: '', checkValidity: () => true };
+  w.run(`DB.inboxArchive = [
+    { id: 'removed', title: '敏感归档标题', raw: '敏感归档原文', connectorId: 'ics', externalId: 'cleared-event', deletedAt: '2026-10-22' },
+    { id: 'confirmed', title: '已转任务原文', raw: '原文', confirmedTask: 't1' },
+    { id: 'ignored', title: '已忽略', connectorId: 'ics', externalId: 'cleared-event' }
+  ]`);
+  const inbox = w.run('JSON.stringify(DB.inbox)');
+  const tasks = w.run('JSON.stringify(allWorkbenchTasks())');
+  await w.run('clearInboxArchive()');
+  assert.equal(w.run('DB.inboxArchive.length'), 3);
+  w.run('requestInboxArchiveClear(); openInboxArchive()');
+  await w.run('clearInboxArchive()');
+  assert.equal(w.run('DB.inboxArchive.length'), 3);
+  w.run('requestInboxArchiveClear()');
+  assert.equal(w.run('DB.inboxArchive.length'), 3);
+  w.run("DB.inboxArchive.push({id:'new-arrival',title:'确认期间新归档'})");
+  await w.run('clearInboxArchive()');
+  assert.equal(w.run('DB.inboxArchive.length'), 1);
+  assert.equal(w.run('DB.inboxArchive[0].id'), 'new-arrival');
+  assert.equal(w.run('JSON.stringify(DB.inbox)'), inbox);
+  assert.equal(w.run('JSON.stringify(allWorkbenchTasks())'), tasks);
+  assert.equal(w.run('JSON.stringify(DB.integrationReceipts)'),
+    JSON.stringify([{ connectorId: 'ics', externalId: 'cleared-event' }]));
+  assert.equal(w.run("importIntegrationRecords('ics',[{externalId:'cleared-event',title:'重复',raw:'原文'}])"), 0);
+  assert.equal(w.run("importIntegrationRecords('mail',[{externalId:'cleared-event',title:'不同连接器',raw:'邮件'}])"), 1);
+  const saved = JSON.parse(String(w.saved[0]));
+  assert.equal(JSON.stringify(saved).includes('敏感归档'), false);
+  assert.equal(saved.inboxArchive.length, 1);
+  assert.equal(saved.integrationReceipts.length, 1);
+  await w.run('clearInboxArchive()');
+  assert.equal(w.run('DB.inboxArchive.length'), 1);
+});
+
 test('weekly and project reports follow edited records instead of fixed prototype content', () => {
   const w = workbench();
   w.run("DB.tasks = {must:[],should:[],could:[]}; DB.taskCalendar={}; state.reportDate='2026-10-21'");

@@ -22,10 +22,10 @@ function initializeFeatures() {
   DB.projects.forEach(p => { p.risks = detailForProject(p).risks.filter(r => r.status !== 'closed').length; });
 }
 
-function localModal(title, body, footer = '', className = '') {
+function localModal(title, body, footer = '', className = '', headerActions = '') {
   document.getElementById('modal-root').innerHTML = `<div class="modal-backdrop" data-action="backdrop">
     <div class="modal ${className}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-      <div class="modal-head"><h2>${esc(title)}</h2><button class="icon-btn" data-action="close-modal" aria-label="关闭">${icon('x')}</button></div>
+      <div class="modal-head"><h2>${esc(title)}</h2><div class="modal-head-actions">${headerActions}<button class="icon-btn" data-action="close-modal" aria-label="关闭">${icon('x')}</button></div></div>
       <div class="modal-body">${body}</div>${footer ? `<div class="modal-foot feature-actions">${footer}</div>` : ''}
     </div></div>`;
 }
@@ -229,9 +229,39 @@ function openInboxBatch() {
 }
 
 function openInboxArchive() {
+  state.clearInboxArchiveIds = null;
   localModal('归档与回收站', `<div class="feature-list">${DB.inboxArchive.slice().reverse().map(i => `<div class="feature-list-row">
     <div><b>${esc(i.title)}</b><p class="small muted">${i.confirmedTask ? '已转为任务' : i.deletedAt ? '已删除 · 回收站' : '已忽略'}</p></div>
-    ${i.confirmedTask ? '' : `<button class="btn btn-sm" data-action="inbox-restore" data-id="${esc(i.id)}">恢复</button>`}</div>`).join('') || '暂无归档'}</div>`);
+    ${i.confirmedTask ? '' : `<button class="btn btn-sm" data-action="inbox-restore" data-id="${esc(i.id)}">恢复</button>`}</div>`).join('') || '暂无归档'}</div>`,
+    '', '', `<button class="btn btn-sm btn-danger" data-action="inbox-archive-clear" ${DB.inboxArchive.length ? '' : 'disabled'}>${icon('trash', 13)} 清空</button>`);
+}
+
+function requestInboxArchiveClear() {
+  if (!DB.inboxArchive.length) { openInboxArchive(); return; }
+  state.clearInboxArchiveIds = DB.inboxArchive.map(item => item.id);
+  localModal('清空归档与回收站', `<p>确认清空当前全部 ${state.clearInboxArchiveIds.length} 条记录？</p>
+    <p class="small muted mt-12">包含已删除、已忽略和已转为任务的归档原文，清空后无法从这里恢复。待处理收件箱和已创建的任务不受影响。</p>`,
+    `<button class="btn" data-action="inbox-archive">取消</button>
+    <button class="btn btn-danger" data-action="inbox-archive-clear-confirm">${icon('trash', 13)} 确认清空</button>`);
+}
+
+async function clearInboxArchive() {
+  const selected = new Set(state.clearInboxArchiveIds || []);
+  state.clearInboxArchiveIds = null;
+  const removed = DB.inboxArchive.filter(item => selected.has(item.id));
+  if (!removed.length) { openInboxArchive(); return; }
+  // Keep source identifiers only, so later syncs cannot resurrect cleared messages.
+  const receipts = new Set(DB.integrationReceipts.map(item => JSON.stringify([item.connectorId, item.externalId])));
+  removed.forEach(({ connectorId, externalId }) => {
+    if (!connectorId || !externalId) return;
+    const key = JSON.stringify([connectorId, externalId]);
+    if (receipts.has(key)) return;
+    DB.integrationReceipts.push({ connectorId, externalId });
+    receipts.add(key);
+  });
+  DB.inboxArchive = DB.inboxArchive.filter(item => !selected.has(item.id));
+  await finishLocal(`已清空 ${removed.length} 条归档与回收站记录`);
+  openInboxArchive();
 }
 
 function openInboxSplit() {
@@ -517,6 +547,8 @@ function handleFeatureAction(action, el) {
       archiveInbox(ids); void finishLocal(`已归档 ${ids.length} 条`); break;
     }
     case 'inbox-archive': openInboxArchive(); break;
+    case 'inbox-archive-clear': requestInboxArchiveClear(); break;
+    case 'inbox-archive-clear-confirm': void clearInboxArchive(); break;
     case 'inbox-restore': {
       const index = DB.inboxArchive.findIndex(i => i.id === id && !i.confirmedTask);
       if (index < 0) break;

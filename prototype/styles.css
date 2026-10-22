@@ -2119,6 +2119,8 @@ h3 { font-size: 13px; font-weight: 650; }
 .modal-head h2 { font-size: 16px; }
 .modal-head .sub { margin-top: 2px; font-size: 10.5px; }
 .modal-head .icon-btn { margin-left: auto; }
+.modal-head-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+.modal-head:has(.modal-head-actions) h2 { min-width: 0; overflow-wrap: anywhere; }
 .modal-body { padding: 20px 22px; overflow-y: auto; flex: 1; min-height: 0; }
 .modal-foot {
   display: flex;

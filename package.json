@@ -1,6 +1,6 @@
 {
   "name": "xiaoyu-workbench",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Xiaoyu personal workbench",
   "main": "./out/main/index.js",

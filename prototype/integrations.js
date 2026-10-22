@@ -31,6 +31,7 @@ function initializeIntegrations() {
   DB.settings.integrations = DB.settings.integrations || {};
   DB.integrationState = DB.integrationState || {};
   DB.integrationLogs = DB.integrationLogs || [];
+  DB.integrationReceipts = DB.integrationReceipts || [];
   // Remove prototype connection indicators, including snapshots saved by older versions.
   DB.connectors.forEach(c => { c.status = c.id === 'manual' ? 'on' : 'off'; });
 }
@@ -147,7 +148,7 @@ async function saveIntegration(keepOpen = false) {
 }
 
 function importIntegrationRecords(id, records) {
-  const existing = new Set([...DB.inbox, ...(DB.inboxArchive || [])]
+  const existing = new Set([...DB.inbox, ...(DB.inboxArchive || []), ...(DB.integrationReceipts || [])]
     .filter(item => item.connectorId === id).map(item => item.externalId));
   let count = 0;
   const source = DB.connectors.find(c => c.id === id)?.name || id;
