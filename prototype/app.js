@@ -16,6 +16,7 @@ function renderView() {
 
 function render() {
   document.documentElement.dataset.theme = state.theme;
+  document.body.dataset.view = state.view;
   const sidebar = document.getElementById('sidebar-root');
   const topbar = document.getElementById('topbar-root');
   const view = document.getElementById('view');
@@ -23,7 +24,7 @@ function render() {
 
   sidebar.innerHTML = renderSidebar();
   topbar.innerHTML = renderTopbar();
-  view.className = 'view view-enter';
+  view.className = 'view view-enter' + (state.view === 'chat' ? ' view-chat' : '');
   view.innerHTML = renderView();
 
   const brand = assistantName();

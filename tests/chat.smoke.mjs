@@ -73,6 +73,20 @@ async function send(text) {
   await page.locator('#chat-input').fill(text);
   await page.locator('[data-action="chat-send"]').click();
   await page.waitForFunction(() => !state.chatSending, null, { timeout: 100000 });
+  await assertComposerFixed();
+}
+async function assertComposerFixed() {
+  await page.evaluate(() => Promise.all(document.getAnimations()
+    .filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity)
+    .map(animation => animation.finished.catch(() => {}))));
+  const layout = await page.evaluate(() => ({
+    height: innerHeight, pageHeight: document.documentElement.scrollHeight,
+    bottom: document.querySelector('.chat-composer').getBoundingClientRect().bottom,
+    threadBottom: document.getElementById('chat-thread').getBoundingClientRect().bottom,
+    composerTop: document.querySelector('.chat-composer').getBoundingClientRect().top
+  }));
+  assert.ok(layout.pageHeight <= layout.height + 1 && Math.abs(layout.bottom - layout.height) <= 2 &&
+    layout.threadBottom <= layout.composerTop + 1, JSON.stringify(layout));
 }
 try {
   await launch();
@@ -87,6 +101,7 @@ try {
   assert.match(await page.locator('#topbar-ai-pill').innerText(), /验收供应商.*semantic-model-a/s);
   assert.equal(await page.locator('#sidebar-ai-name').innerText(), '验收供应商');
   await page.locator('.nav [data-view="chat"]').click();
+  await assertComposerFixed();
   assert.match(await page.locator('.chat-active-model').innerText(), /semantic-model-a/);
   const initial = await page.evaluate(() => ({ tasks: allWorkbenchTasks().length, inbox: DB.inbox.length,
     projects: DB.projects.length }));
@@ -142,7 +157,7 @@ try {
   assert.deepEqual(errors, []);
   const result = { passed: true, realIPCAndHTTP: true, homepageSynced: true,
     qaAndHistory: true, semanticTaskProgressAndProject: true, confirmationRequired: true,
-    failureRetry: true, modelSwitch: true, persistedAcrossRestart: true, requests: requests.length, profile };
+    failureRetry: true, modelSwitch: true, composerFixedAtBottom: true, persistedAcrossRestart: true, requests: requests.length, profile };
   writeFileSync(join(evidence, 'chat-audit.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
 } catch (error) {

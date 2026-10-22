@@ -196,7 +196,6 @@ function renderChat() {
               <button class="send-btn" data-action="chat-send" aria-label="发送" ${state.chatSending ? 'disabled' : ''}>${icon('arrowUp', 16)}</button>
             </div>
           </div>
-          <div class="composer-hint">Enter 发送 · Shift+Enter 换行 · 写操作会先给你确认</div>
         </div>
       </section>
 

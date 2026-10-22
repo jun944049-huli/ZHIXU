@@ -220,8 +220,69 @@ try {
       dimensions.cardScroll <= dimensions.cardWidth + 1, 'model chat: ' + JSON.stringify(dimensions));
     await page.screenshot({ path: resolve(evidence, `browser-model-chat-${width}.png`), fullPage: true });
   }
+  await page.evaluate(() => {
+    state.chatMessages.push(...Array.from({ length: 40 }, (_, index) => ({
+      role: index % 2 ? 'assistant' : 'user', time: '布局验收', model: '布局验收',
+      text: `第 ${index + 1} 条长对话\n${'检查滚动时输入区保持在窗口底部。'.repeat(12)}`
+    })));
+    render();
+  });
+  const chatLayouts = [];
+  for (const viewport of [{ width: 1920, height: 1080 }, { width: 1440, height: 900 },
+    { width: 1280, height: 720 }, { width: 390, height: 844 },
+    { width: 390, height: 600 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(viewport);
+    await finishAnimations();
+    await page.evaluate(() => scrollChatToBottom());
+    const before = await page.locator('.chat-composer').boundingBox();
+    const dimensions = await page.evaluate(() => {
+      const thread = document.getElementById('chat-thread');
+      const composer = document.querySelector('.chat-composer').getBoundingClientRect();
+      return {
+        width: innerWidth, height: innerHeight, pageWidth: document.documentElement.scrollWidth,
+        pageHeight: document.documentElement.scrollHeight, composerBottom: composer.bottom,
+        composerTop: composer.top, threadBottom: thread.getBoundingClientRect().bottom,
+        threadHeight: thread.clientHeight, threadScroll: thread.scrollTop,
+        lastMessageBottom: thread.lastElementChild.getBoundingClientRect().bottom
+      };
+    });
+    assert.ok(dimensions.pageWidth <= viewport.width + 1 && dimensions.pageHeight <= viewport.height + 1 &&
+      Math.abs(dimensions.composerBottom - viewport.height) <= 2 && dimensions.threadHeight >= 60 &&
+      dimensions.threadBottom <= dimensions.composerTop + 1 &&
+      dimensions.lastMessageBottom <= dimensions.threadBottom + 1, 'fixed composer: ' + JSON.stringify(dimensions));
+    assert.ok(dimensions.threadScroll > 0, 'long thread must scroll');
+    await page.locator('#chat-thread').hover();
+    await page.mouse.wheel(0, -700);
+    await page.waitForFunction(previous => document.getElementById('chat-thread').scrollTop < previous, dimensions.threadScroll);
+    const after = await page.locator('.chat-composer').boundingBox();
+    assert.ok(Math.abs(before.y - after.y) <= 1 && Math.abs(before.height - after.height) <= 1);
+    assert.equal(await page.evaluate(() => scrollY), 0);
+    if (await page.locator('.chat-rail').isVisible()) {
+      await page.locator('.chat-rail').hover();
+      await page.mouse.wheel(0, 1200);
+      const rail = await page.locator('.chat-rail').evaluate(element => ({
+        scroll: element.scrollTop, contentHeight: element.scrollHeight, height: element.clientHeight
+      }));
+      if (rail.contentHeight > rail.height + 1) {
+        await page.waitForFunction(() => document.querySelector('.chat-rail').scrollTop > 0);
+      }
+      assert.equal(await page.evaluate(() => scrollY), 0);
+    }
+    await page.locator('#chat-input').fill('多行输入第一行\n第二行\n第三行');
+    const send = await page.locator('[data-action="chat-send"]').boundingBox();
+    assert.ok(send.y >= dimensions.composerTop && send.y + send.height <= viewport.height);
+    await page.screenshot({ path: resolve(evidence, `browser-chat-fixed-${viewport.width}x${viewport.height}.png`) });
+    chatLayouts.push({ viewport, ...dimensions });
+  }
+  await page.locator('.nav [data-view="projects"]').click();
+  assert.equal(await page.locator('.view-chat').count(), 0);
+  await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+  assert.ok(await page.evaluate(() => scrollY > 0), 'other pages must keep normal scrolling');
+  await page.locator('.nav [data-view="chat"]').click();
+  await finishAnimations();
+  assert.equal(await page.evaluate(() => scrollY), 0);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: true, projectId, overflow }));
+  console.log(JSON.stringify({ passed: true, projectId, overflow, chatLayouts }));
 } finally {
   await browser.close();
 }
