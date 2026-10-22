@@ -1257,6 +1257,20 @@ h3 { font-size: 13px; font-weight: 650; }
 .project-editor .modal-head { justify-content: space-between; }
 .project-editor .modal-body { display: block; }
 .project-editor .modal-body.form-grid { display: grid; }
+.project-stakeholders { min-width: 0; border-top: 1px solid var(--line); padding-top: 14px; }
+.stakeholder-editor-head { justify-content: space-between; }
+.project-stakeholders h3 { font-size: 14px; margin: 0; }
+#project-stakeholder-list { display: grid; gap: 12px; margin-top: 12px; }
+.stakeholder-editor-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; gap: 10px; align-items: end; }
+.stakeholder-editor-row .field { min-width: 0; }
+.stakeholder-editor-row .icon-btn { width: 32px; height: 38px; }
+.stakeholder-error { color: var(--red); margin: 10px 0 0; }
+.person-row > div { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .stakeholder-editor-row { grid-template-columns: minmax(0, 1fr) 32px; }
+  .stakeholder-editor-row .field { grid-column: 1; }
+  .stakeholder-editor-row .icon-btn { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+}
 .integration-fields { display: grid; gap: 14px; margin-top: 18px; }
 .integration-modal .modal-head h2 { overflow-wrap: anywhere; }
 .integration-actions { flex-wrap: wrap; }

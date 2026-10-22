@@ -59,7 +59,52 @@ try {
   const modal = await page.locator('.project-editor').boundingBox();
   assert.ok(modal.x >= 0 && modal.x + modal.width <= 391);
   await page.screenshot({ path: resolve(evidence, 'browser-project-mobile-modal.png') });
-  await page.locator('.project-editor [data-action="close-modal"]').first().click();
+  await page.locator('[data-action="project-stakeholder-add"]').click();
+  await page.locator('[data-stakeholder-name]').fill('长姓名干系人项目审批负责人');
+  await page.locator('[data-stakeholder-role]').fill('客户业务负责人及项目验收代表');
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.locator('#project-stakeholders-title').scrollIntoViewIfNeeded();
+    await finishAnimations();
+    const dimensions = await page.locator('.project-editor').evaluate(element => ({
+      left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right,
+      bodyWidth: element.querySelector('.modal-body').clientWidth,
+      bodyScroll: element.querySelector('.modal-body').scrollWidth
+    }));
+    assert.ok(dimensions.left >= 0 && dimensions.right <= width && dimensions.bodyScroll <= dimensions.bodyWidth + 1,
+      'stakeholder editor: ' + JSON.stringify(dimensions));
+    const controls = await page.locator('.stakeholder-editor-row input, .stakeholder-editor-row button')
+      .evaluateAll(elements => elements.map(element => {
+        const rect = element.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+      }));
+    for (let i = 0; i < controls.length; i++) {
+      assert.ok(controls[i].left >= dimensions.left && controls[i].right <= dimensions.right);
+      for (const other of controls.slice(i + 1)) {
+        const rect = controls[i];
+        assert.ok(rect.right <= other.left || other.right <= rect.left || rect.bottom <= other.top || other.bottom <= rect.top);
+      }
+    }
+    await page.screenshot({ path: resolve(evidence, `browser-stakeholders-${width}.png`) });
+  }
+  await page.locator('#project-name').fill('干系人布局验收项目');
+  await page.locator('[data-stakeholder-name]').fill('Stakeholder'.repeat(8));
+  await page.locator('[data-stakeholder-role]').fill('项目客户业务及验收负责人'.repeat(6));
+  await page.locator('[data-action="save-project"]').click();
+  await page.locator('.project-editor').waitFor({ state: 'detached' });
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.locator('.project-stakeholder-panel').scrollIntoViewIfNeeded();
+    await finishAnimations();
+    const dimensions = await page.locator('.project-stakeholder-panel').evaluate(element => ({
+      left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right,
+      width: element.clientWidth, scroll: element.scrollWidth
+    }));
+    assert.ok(dimensions.left >= 0 && dimensions.right <= width && dimensions.scroll <= dimensions.width + 1,
+      'stakeholder overview: ' + JSON.stringify(dimensions));
+    await page.screenshot({ path: resolve(evidence, `browser-stakeholders-overview-${width}.png`) });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('[data-action="nav"][data-view="data"]').click();
   await page.locator('.connector-card[data-id="mail"]').click();
   await finishAnimations();

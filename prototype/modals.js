@@ -7,6 +7,7 @@ function closeModal() {
   }
   state.polishRequestId += 1;
   state.polishLoading = false;
+  state.projectStakeholderDraft = null;
   const root = document.getElementById('modal-root');
   if (root) root.innerHTML = '';
 }
@@ -35,7 +36,33 @@ function deriveInitials(name) {
   return s.slice(0, 2);
 }
 
-function openProjectEditor(id) {
+function projectStakeholderRows() {
+  return (state.projectStakeholderDraft || []).map((person, index) => `
+    <div class="stakeholder-editor-row" data-stakeholder-id="${esc(person.id)}" role="group" aria-label="干系人 ${index + 1}">
+      <div class="field"><label for="stakeholder-name-${esc(person.id)}">姓名 *</label>
+        <input class="input" id="stakeholder-name-${esc(person.id)}" data-stakeholder-name maxlength="80" value="${esc(person.name)}" required></div>
+      <div class="field"><label for="stakeholder-role-${esc(person.id)}">角色</label>
+        <input class="input" id="stakeholder-role-${esc(person.id)}" data-stakeholder-role maxlength="80" value="${esc(person.role)}" placeholder="例如 客户、项目经理"></div>
+      <button class="icon-btn" data-action="project-stakeholder-remove" data-id="${esc(person.id)}" title="移除干系人" aria-label="移除干系人 ${index + 1}">${icon('trash', 15)}</button>
+    </div>`).join('') || '<p class="small muted">尚未添加干系人</p>';
+}
+
+function changeProjectStakeholder(removeId) {
+  const people = readProjectStakeholders();
+  if (!people) return;
+  state.projectStakeholderDraft = removeId
+    ? people.filter(person => person.id !== removeId)
+    : [...people, { id: newRecordId('stakeholder'), name: '', role: '', c: DB.user.color }];
+  document.getElementById('project-stakeholder-list').innerHTML = projectStakeholderRows();
+  document.getElementById('project-stakeholder-error').hidden = true;
+  if (!removeId) {
+    document.querySelector('.stakeholder-editor-row:last-child [data-stakeholder-name]').focus();
+  } else {
+    document.querySelector('[data-action="project-stakeholder-add"]').focus();
+  }
+}
+
+function openProjectEditor(id, focusStakeholders = false) {
   const project = id ? projectById(id) : null;
   if (id && !project) { showToast('项目已不存在'); return; }
   state.editProjectId = project?.id || null;
@@ -43,6 +70,9 @@ function openProjectEditor(id) {
     name: '', code: '', goal: '', owner: DB.user.name, progress: 0,
     health: 'green', next: '', nextDate: ''
   };
+  state.projectStakeholderDraft = (project ? detailForProject(project).stakeholders : []).map(person => ({
+    ...person, id: person.id || newRecordId('stakeholder')
+  }));
   document.getElementById('modal-root').innerHTML = `
     <div class="modal-backdrop" data-action="backdrop">
       <div class="modal project-editor" role="dialog" aria-modal="true" aria-label="${project ? '编辑项目' : '新建项目'}">
@@ -69,6 +99,14 @@ function openProjectEditor(id) {
             <input class="input" id="project-next" maxlength="80" value="${esc(p.next === '未安排' ? '' : p.next)}"></div>
           <div class="field"><label for="project-next-date">节点日期</label>
             <input class="input" id="project-next-date" maxlength="30" value="${esc(p.nextDate === '—' ? '' : p.nextDate)}" placeholder="例如 2026-11-01"></div>
+          <section class="project-stakeholders full" aria-labelledby="project-stakeholders-title">
+            <div class="stakeholder-editor-head row gap-8">
+              <h3 id="project-stakeholders-title">干系人</h3>
+              <button class="btn btn-sm" data-action="project-stakeholder-add">${icon('plus', 13)} 添加干系人</button>
+            </div>
+            <div id="project-stakeholder-list">${projectStakeholderRows()}</div>
+            <p class="stakeholder-error small" id="project-stakeholder-error" role="alert" hidden></p>
+          </section>
           ${customFieldInputs('project', p)}
         </div>
         <div class="modal-foot">
@@ -77,7 +115,11 @@ function openProjectEditor(id) {
         </div>
       </div>
     </div>`;
-  document.getElementById('project-name').focus();
+  if (focusStakeholders) {
+    document.getElementById('project-stakeholders-title').scrollIntoView({ block: 'center' });
+    (document.querySelector('[data-stakeholder-name]') ||
+      document.querySelector('[data-action="project-stakeholder-add"]')).focus();
+  } else document.getElementById('project-name').focus();
 }
 
 function openProjectDelete(id) {

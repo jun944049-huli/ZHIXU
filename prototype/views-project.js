@@ -218,7 +218,7 @@ function renderProject() {
         <div class="person-role">${esc(s.role)}</div>
       </div>
     </div>
-  `).join('');
+  `).join('') || '<p class="small muted">尚未添加干系人</p>';
 
   const projectTime = DB.timeEntries.filter(e => e.project === p.id && e.date >= startOfWeekISO(DB.meta.today));
   const timeSplit = projectTime.length ? [{ label: '专注计时', value: Math.round(projectTime.reduce((sum, e) => sum + e.seconds / 3600, 0) * 10) / 10, color: p.color }] : [];
@@ -299,8 +299,12 @@ function renderProject() {
             <div class="panel-body"><div class="activity-list">${activity}</div></div>
           </div>
 
-          <div class="card">
-            <div class="panel-head"><h3>${icon('user', 14)} 干系人</h3><span class="tiny muted">${detail.stakeholders.length} 人</span></div>
+          <div class="card project-stakeholder-panel">
+            <div class="panel-head"><h3>${icon('user', 14)} 干系人</h3>
+              <div class="row gap-8"><span class="tiny muted">${detail.stakeholders.length} 人</span>
+                <button class="icon-btn sm" data-action="edit-project-stakeholders" data-id="${esc(p.id)}" title="管理干系人" aria-label="管理干系人">${icon('edit', 13)}</button>
+              </div>
+            </div>
             <div class="panel-body"><div class="people-list">${people}</div></div>
           </div>
 

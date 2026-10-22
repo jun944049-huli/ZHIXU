@@ -37,6 +37,17 @@ function addConfirmedTask(task, date, bucket) {
   updateTaskCapacity();
 }
 
+function readProjectStakeholders() {
+  const list = document.getElementById('project-stakeholder-list');
+  if (!list) return null;
+  return [...list.querySelectorAll('[data-stakeholder-id]')].map(row => ({
+    ...state.projectStakeholderDraft?.find(person => person.id === row.dataset.stakeholderId),
+    id: row.dataset.stakeholderId,
+    name: row.querySelector('[data-stakeholder-name]').value.trim(),
+    role: row.querySelector('[data-stakeholder-role]').value.trim()
+  }));
+}
+
 async function saveProject() {
   const name = document.getElementById('project-name').value.trim();
   const progressInput = document.getElementById('project-progress');
@@ -47,6 +58,19 @@ async function saveProject() {
   }
   const existing = state.editProjectId ? projectById(state.editProjectId) : null;
   if (state.editProjectId && !existing) { showToast('项目已不存在'); return; }
+  const stakeholders = readProjectStakeholders();
+  if (stakeholders) {
+    const invalid = stakeholders.findIndex(person => !person.name || person.name.length > 80 || person.role.length > 80);
+    const error = document.getElementById('project-stakeholder-error');
+    if (error) error.hidden = invalid < 0;
+    if (invalid >= 0) {
+      const message = `请填写第 ${invalid + 1} 位干系人的姓名，姓名和角色均不超过 80 字`;
+      if (error) error.textContent = message;
+      document.querySelectorAll('[data-stakeholder-name]')[invalid].focus();
+      showToast(message);
+      return;
+    }
+  }
   const project = {
     ...(existing || {
       id: newRecordId('project'), color: DB.user.color, planned: 0, open: 0, risks: 0,
@@ -62,6 +86,16 @@ async function saveProject() {
     nextDate: document.getElementById('project-next-date').value.trim() || '—',
     updated: '刚刚', customValues: { ...existing?.customValues, ...readCustomFields('project') }
   };
+  if (stakeholders) {
+    const detail = detailForProject(project);
+    DB.projectDetails[project.id] = {
+      ...detail,
+      stakeholders: stakeholders.map(person => ({
+        ...person, role: person.role || '项目成员',
+        i: deriveInitials(person.name), c: person.c || project.color
+      }))
+    };
+  }
   if (existing) Object.assign(existing, project);
   else DB.projects.push(project);
   closeModal();

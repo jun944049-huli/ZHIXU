@@ -106,6 +106,15 @@ function handleClick(e) {
     case 'edit-project':
       openProjectEditor(el.dataset.id);
       break;
+    case 'edit-project-stakeholders':
+      openProjectEditor(el.dataset.id, true);
+      break;
+    case 'project-stakeholder-add':
+      changeProjectStakeholder();
+      break;
+    case 'project-stakeholder-remove':
+      changeProjectStakeholder(el.dataset.id);
+      break;
     case 'save-project':
       saveProject();
       break;
