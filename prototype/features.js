@@ -198,13 +198,28 @@ async function saveWorkHours() {
   await finishLocal('工作时间与可用产能已更新');
 }
 
-function archiveInbox(ids) {
+function archiveInbox(ids, disposition = 'ignored') {
   const selected = new Set(ids);
   DB.inbox.filter(i => selected.has(i.id)).forEach(item => DB.inboxArchive.push({
-    ...item, ignoredAt: new Date().toISOString()
+    ...item, [disposition === 'deleted' ? 'deletedAt' : 'ignoredAt']: new Date().toISOString()
   }));
   DB.inbox = DB.inbox.filter(i => !selected.has(i.id));
   state.inboxId = DB.inbox[0]?.id || null;
+}
+
+function requestInboxDelete(id) {
+  const item = DB.inbox.find(i => i.id === id);
+  if (!item) { showToast('这条事项已不在收件箱中'); return; }
+  localModal('删除收件箱事项', `<p>确认删除「${esc(item.title)}」？</p>
+    <p class="small muted mt-12">删除后移入回收站，可在“归档与回收站”中恢复。已创建的任务不会受到影响。</p>`,
+    `<button class="btn" data-action="close-modal">取消</button>
+    <button class="btn btn-danger" data-action="inbox-delete-confirm" data-id="${esc(item.id)}">${icon('trash', 13)} 确认删除</button>`);
+}
+
+async function deleteInboxItem(id) {
+  if (!DB.inbox.some(i => i.id === id)) { closeModal(); showToast('这条事项已不在收件箱中'); return; }
+  archiveInbox([id], 'deleted');
+  await finishLocal('事项已删除，可在归档与回收站中恢复');
 }
 
 function openInboxBatch() {
@@ -214,8 +229,8 @@ function openInboxBatch() {
 }
 
 function openInboxArchive() {
-  localModal('已归档收件箱', `<div class="feature-list">${DB.inboxArchive.slice().reverse().map(i => `<div class="feature-list-row">
-    <div><b>${esc(i.title)}</b><p class="small muted">${i.confirmedTask ? '已转为任务' : '已忽略'}</p></div>
+  localModal('归档与回收站', `<div class="feature-list">${DB.inboxArchive.slice().reverse().map(i => `<div class="feature-list-row">
+    <div><b>${esc(i.title)}</b><p class="small muted">${i.confirmedTask ? '已转为任务' : i.deletedAt ? '已删除 · 回收站' : '已忽略'}</p></div>
     ${i.confirmedTask ? '' : `<button class="btn btn-sm" data-action="inbox-restore" data-id="${esc(i.id)}">恢复</button>`}</div>`).join('') || '暂无归档'}</div>`);
 }
 
@@ -489,6 +504,8 @@ function handleFeatureAction(action, el) {
       closeModal(); render(); break;
     case 'work-hours': openWorkHours(); break;
     case 'work-hours-save': void saveWorkHours(); break;
+    case 'inbox-delete': requestInboxDelete(id); break;
+    case 'inbox-delete-confirm': void deleteInboxItem(id); break;
     case 'inbox-ignore': {
       const item = DB.inbox.find(i => i.id === state.inboxId) || DB.inbox[0];
       if (item) { archiveInbox([item.id]); void finishLocal('已忽略，可在归档中恢复'); } break;
@@ -503,7 +520,7 @@ function handleFeatureAction(action, el) {
     case 'inbox-restore': {
       const index = DB.inboxArchive.findIndex(i => i.id === id && !i.confirmedTask);
       if (index < 0) break;
-      const [item] = DB.inboxArchive.splice(index, 1); delete item.ignoredAt;
+      const [item] = DB.inboxArchive.splice(index, 1); delete item.ignoredAt; delete item.deletedAt;
       DB.inbox.unshift(item); state.inboxId = item.id; void finishLocal('已恢复到收件箱'); break;
     }
     case 'inbox-split': openInboxSplit(); break;

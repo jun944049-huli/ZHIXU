@@ -16,6 +16,7 @@ const knownActions = new Set([...source.matchAll(/case '([^']+)'/g)].map(match =
 knownActions.add('backdrop');
 const observed = new Set();
 const errors = [];
+const captureScreenshots = process.env.XIAOYU_SKIP_SCREENSHOTS !== '1';
 const application = await electron.launch({
   executablePath: process.env.XIAOYU_TEST_EXE || resolve(root, 'node_modules/electron/dist/electron.exe'),
   args: process.env.XIAOYU_TEST_EXE ? [] : [resolve(root, 'out/main/index.js')],
@@ -47,7 +48,7 @@ try {
   for (const view of ['today', 'chat', 'inbox', 'projects', 'reports', 'profile', 'data']) {
     await nav(view);
     await audit(view);
-    await page.screenshot({ path: join(evidence, `audit-${view}.png`), scale: 'css' });
+    if (captureScreenshots) await page.screenshot({ path: join(evidence, `audit-${view}.png`), scale: 'css' });
   }
   await nav('today');
   const taskId = await page.locator('.task-row').first().getAttribute('data-task');
@@ -93,6 +94,26 @@ try {
   await page.waitForFunction(() => allWorkbenchTasks().some(t => t.title === '核查插单排期'));
 
   await nav('inbox');
+  const deleteId = await page.evaluate(() => DB.inbox[0].id);
+  const deleteCount = await page.evaluate(() => DB.inbox.length);
+  await page.locator('[data-action="inbox-delete"]').click();
+  await audit('inbox delete confirmation');
+  await close();
+  assert.equal(await page.evaluate(() => DB.inbox.length), deleteCount);
+  await page.locator('[data-action="inbox-delete"]').click();
+  await page.locator('[data-action="inbox-delete-confirm"]').click();
+  await page.waitForFunction(id => !DB.inbox.some(i => i.id === id), deleteId);
+  assert.equal(await page.locator(`.inbox-item[data-id="${deleteId}"]`).count(), 0);
+  await page.evaluate(() => persistWorkbench());
+  await page.reload();
+  await page.waitForFunction(() => typeof workbenchReady !== 'undefined' && workbenchReady);
+  await nav('inbox');
+  assert.equal(await page.evaluate(id => DB.inbox.some(i => i.id === id), deleteId), false);
+  await page.locator('[data-action="inbox-archive"]').click();
+  await audit('inbox recycle bin');
+  assert.match(await page.locator('#modal-root').innerText(), /已删除 · 回收站/);
+  await page.locator(`[data-action="inbox-restore"][data-id="${deleteId}"]`).click();
+  await page.waitForFunction(id => DB.inbox.some(i => i.id === id), deleteId);
   const inboxId = await page.evaluate(() => DB.inbox[0].id);
   await page.locator('[data-action="inbox-ignore"]').click();
   await page.waitForFunction(id => !DB.inbox.some(i => i.id === id), inboxId);
@@ -138,7 +159,11 @@ try {
   await page.locator('[data-action="project-board"]').click();
   assert.equal(await page.locator('.task-board').count(), 1);
   await settle();
-  await page.screenshot({ path: join(evidence, 'audit-board.png'), scale: 'css' });
+  if (captureScreenshots) {
+    const mainWindow = await application.browserWindow(page);
+    await mainWindow.evaluate(window => { if (window.isMinimized()) window.restore(); window.show(); });
+    await page.screenshot({ path: join(evidence, 'audit-board.png'), scale: 'css', animations: 'disabled' });
+  }
 
   await nav('reports');
   for (const report of ['daily', 'weekly', 'monthly', 'project', 'risk', 'requirements']) {
@@ -211,12 +236,31 @@ try {
   assert.equal(await page.evaluate(() => DB.experiments[0].title), '核查两周实验');
   assert.equal(await page.evaluate(() => DB.workday.start), '08:30');
   assert.equal(await page.evaluate(() => DB.fields.task.some(f => f.name === '核查扩展字段')), true);
+  await nav('inbox');
+  const remainingInboxIds = await page.evaluate(() => DB.inbox.map(item => item.id));
+  const tasksBeforeClearing = await page.evaluate(() => allWorkbenchTasks().length);
+  for (const id of remainingInboxIds) {
+    await page.locator(`.inbox-item[data-id="${id}"]`).click();
+    await page.locator('[data-action="inbox-delete"]').click();
+    await page.locator('[data-action="inbox-delete-confirm"]').click();
+    await page.waitForFunction(id => !DB.inbox.some(item => item.id === id), id);
+  }
+  assert.match(await page.locator('.empty-day').innerText(), /收件箱已清空/);
+  await page.evaluate(() => persistWorkbench());
+  await page.reload();
+  await page.waitForFunction(() => typeof workbenchReady !== 'undefined' && workbenchReady);
+  await nav('inbox');
+  assert.equal(await page.evaluate(() => DB.inbox.length), 0);
+  assert.equal(await page.evaluate(() => allWorkbenchTasks().length), tasksBeforeClearing);
+  await page.locator('[data-action="inbox-archive"]').click();
+  await page.locator(`[data-action="inbox-restore"][data-id="${remainingInboxIds[0]}"]`).click();
+  await page.waitForFunction(() => DB.inbox.length === 1);
   assert.deepEqual(errors, []);
-  const result = { passed: true, views: 7, projectTabs: 6, reportTypes: 6, actions: [...observed].sort(), exported: readdirSync(exported), profile };
+  const result = { passed: true, captureScreenshots, views: 7, projectTabs: 6, reportTypes: 6, actions: [...observed].sort(), exported: readdirSync(exported), profile };
   writeFileSync(join(evidence, 'interface-audit.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
 } catch (error) {
-  await page.screenshot({ path: join(evidence, 'interface-failure.png'), scale: 'css' }).catch(() => {});
+  if (captureScreenshots) await page.screenshot({ path: join(evidence, 'interface-failure.png'), scale: 'css', timeout: 5000 }).catch(() => {});
   console.error(await page.locator('body').innerText().catch(() => 'Window unavailable'));
   throw error;
 } finally { await application.close(); }

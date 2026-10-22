@@ -495,7 +495,7 @@ function renderInbox() {
   const item = DB.inbox.find(i => i.id === state.inboxId) || DB.inbox[0];
   if (!item) return `
     <div class="page-head"><div><h1>收件箱</h1></div>
-      <div class="head-actions"><button class="btn" data-action="inbox-archive">已归档</button><button class="btn btn-primary" data-action="capture">${icon('plus', 14)} 新捕获</button></div>
+      <div class="head-actions"><button class="btn" data-action="inbox-archive">归档与回收站</button><button class="btn btn-primary" data-action="capture">${icon('plus', 14)} 新捕获</button></div>
     </div>
     <div class="empty-day">${icon('check', 20)}<div><b>收件箱已清空</b><p>已确认的事项可以在今日清单中查看。</p></div></div>
   `;
@@ -539,7 +539,7 @@ function renderInbox() {
         <p class="sub">所有来源先落到这里。AI 只出草稿，你确认后才进入项目。</p>
       </div>
       <div class="head-actions">
-        <button class="btn" data-action="inbox-archive">已归档</button>
+        <button class="btn" data-action="inbox-archive">归档与回收站</button>
         <button class="btn" data-action="inbox-batch">${icon('inbox', 14)} 批量整理</button>
         <button class="btn btn-primary" data-action="capture">${icon('plus', 14)} 新捕获</button>
       </div>
@@ -560,6 +560,7 @@ function renderInbox() {
             <span class="small strong">${esc(item.person)}</span>
             <span class="tiny muted">${esc(item.time)}</span>
             <span class="chip outline" style="margin-left:auto">${icon('lock', 11)} 原文保留</span>
+            <button class="btn btn-sm btn-danger" data-action="inbox-delete" data-id="${esc(item.id)}" aria-label="删除当前收件箱事项">${icon('trash', 13)} 删除</button>
           </div>
           <div class="raw-quote">${esc(item.raw)}</div>
           <div class="raw-foot">

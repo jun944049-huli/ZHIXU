@@ -1155,7 +1155,7 @@ h3 { font-size: 13px; font-weight: 650; }
 
 .inbox-detail { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .raw-card { padding: 18px 20px; }
-.raw-head { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
+.raw-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 11px; }
 .raw-quote {
   padding-left: 14px;
   border-left: 2px solid var(--accent);
@@ -2963,6 +2963,7 @@ h3 { font-size: 13px; font-weight: 650; }
   .topbar { padding: 0 16px; }
   .topbar .kbd { display: none; }
   .page-head { flex-direction: column; gap: 10px; }
+  .head-actions { flex-wrap: wrap; }
   .today-rail, .detail-rail { grid-template-columns: 1fr; }
   .form-grid { grid-template-columns: 1fr; }
   .connector-grid { grid-template-columns: repeat(2, 1fr); }

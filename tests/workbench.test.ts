@@ -196,6 +196,28 @@ test('ignoring and restoring inbox records keeps source identity available for d
   assert.equal(w.run('DB.inboxArchive.length'), 0);
 });
 
+test('deleting an inbox record preserves its source, deduplicates syncs and can be restored', async () => {
+  const w = workbench();
+  const taskCount = w.run('allWorkbenchTasks().length');
+  const inboxCount = w.run('DB.inbox.length');
+  w.run("DB.inbox[0].connectorId='ics'; DB.inbox[0].externalId='deleted-event'");
+  const id = w.run('DB.inbox[0].id');
+  const raw = w.run('DB.inbox[0].raw');
+  await w.run(`deleteInboxItem(${JSON.stringify(id)})`);
+  await w.run(`deleteInboxItem(${JSON.stringify(id)})`);
+  assert.equal(w.run('DB.inbox.length'), inboxCount - 1);
+  assert.equal(w.run('DB.inboxArchive.length'), 1);
+  assert.equal(w.run('DB.inboxArchive[0].raw'), raw);
+  assert.ok(w.run('DB.inboxArchive[0].deletedAt'));
+  assert.equal(w.run('allWorkbenchTasks().length'), taskCount);
+  assert.equal(w.run("importIntegrationRecords('ics',[{externalId:'deleted-event',title:'重复',raw:'原文'}])"), 0);
+  assert.equal(JSON.parse(String(w.saved[0])).inboxArchive[0].id, id);
+  await w.run(`handleFeatureAction('inbox-restore',{dataset:{id:${JSON.stringify(id)}}})`);
+  assert.equal(w.run('DB.inbox[0].id'), id);
+  assert.equal(w.run('DB.inbox[0].deletedAt'), undefined);
+  assert.equal(w.run('DB.inboxArchive.length'), 0);
+});
+
 test('timers switch cleanly and completing a timed task records the elapsed session', async () => {
   const w = workbench();
   await w.run("toggleTimer('t1')");
