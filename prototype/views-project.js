@@ -389,7 +389,7 @@ function renderProject() {
   } else {
     tabContent = `
       <div class="card">
-        <div class="panel-head"><h3>${icon('file', 15)} 文档与产出</h3><button class="btn btn-sm" data-action="document-upload">${icon('upload', 12)} 上传文本</button></div>
+        <div class="panel-head"><h3>${icon('file', 15)} 文档与产出</h3><button class="btn btn-sm" data-action="document-upload">${icon('upload', 12)} 上传文档</button></div>
         <div class="doc-list">${docs || '<div class="panel-body muted small">暂无文档</div>'}</div>
       </div>
     `;

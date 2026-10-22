@@ -19,7 +19,7 @@ function workbench() {
     persistWorkbench: async () => { saved.push(runInContext('JSON.stringify(DB)', context)); }
   });
   for (const file of ['data.js', 'shared.js', 'views-chat.js', 'views-project.js', 'views-output.js',
-    'operations.js', 'integrations.js', 'features.js', 'analytics.js']) {
+    'operations.js', 'integrations.js', 'features.js', 'analytics.js', 'documents.js']) {
     runInContext(readFileSync(resolve('prototype', file), 'utf8'), context, { filename: file });
   }
   runInContext('initializeIntegrations(); initializeFeatures();', context);
@@ -32,6 +32,7 @@ function workbench() {
 test('project removal preserves linked tasks across all dates and archives notes', async () => {
   const w = workbench();
   const before = w.run('allWorkbenchTasks().length');
+  w.run("DB.documents.push({id:'linked-doc',projectId:'p1',content:'保留附件正文',analysis:{projectId:'p1'}})");
   w.run("projectNotesFor('p1').push({ text: '原始记录' }); state.deleteProjectId = 'p1'; state.chatContext = 'p1'");
   await w.run('deleteProject()');
   assert.equal(w.run("projectById('p1')"), null);
@@ -43,6 +44,8 @@ test('project removal preserves linked tasks across all dates and archives notes
   assert.equal(w.run('state.chatContext'), 'auto');
   assert.equal(JSON.parse(w.preferences['jw-project-notes']).p1, undefined);
   assert.equal(w.saved.length, 1);
+  assert.equal(w.run("documentById('linked-doc').projectId"), null);
+  assert.equal(w.run("documentById('linked-doc').content"), '保留附件正文');
 });
 
 test('removing the last project leaves both portfolio and stale detail routes usable', async () => {
@@ -289,4 +292,28 @@ test('risk scores validate before saving and closing a risk updates project coun
   assert.equal(w.run('DB.projectDetails.p1.risks.length'), before + 1);
   assert.equal(w.run('DB.projectDetails.p1.risks.at(-1).score'), 16);
   assert.equal(w.run("projectById('p1').risks"), before);
+});
+
+test('document application is idempotent, edits live tasks and never revives deleted tasks', async () => {
+  const w = workbench();
+  const before = w.run('allWorkbenchTasks().length');
+  w.run(`DB.documents.push({id:'doc-qa',title:'验收.docx',content:'完成设备验收',analysis:{
+    summary:'验收',mode:'本地规则',tasks:[{id:'draft-qa',title:'完成设备验收',assignee:'QA',
+      due:'2030-01-05',priority:'P2',estimateHours:2,evidence:'完成设备验收',selected:true}]}})`);
+  await w.run("applyDocumentToProject(documentById('doc-qa'),'p1')");
+  await w.run("applyDocumentToProject(documentById('doc-qa'),'p1')");
+  assert.equal(w.run('allWorkbenchTasks().length'), before + 1);
+  assert.equal(w.run("DB.projectDetails.p1.docs.filter(d=>d.id==='doc-qa').length"), 1);
+  const taskId = w.run("documentById('doc-qa').analysis.tasks[0].taskId");
+  w.run("documentById('doc-qa').analysis.tasks[0].title='已修改验收任务'");
+  w.run("documentById('doc-qa').analysis.tasks[0].due='2030-01-06'");
+  await w.run("applyDocumentToProject(documentById('doc-qa'),'p2')");
+  assert.equal(w.run(`taskLocation(${JSON.stringify(taskId)}).task.title`), '已修改验收任务');
+  assert.equal(w.run(`taskLocation(${JSON.stringify(taskId)}).task.project`), 'p2');
+  assert.equal(w.run(`taskLocation(${JSON.stringify(taskId)}).date`), '2030-01-06');
+  assert.equal(w.run("DB.projectDetails.p1.docs.some(d=>d.id==='doc-qa')"), false);
+  w.run(`{ const found=taskLocation(${JSON.stringify(taskId)}); found.list.splice(found.index,1); }`);
+  await w.run("applyDocumentToProject(documentById('doc-qa'),'p2')");
+  assert.equal(w.run('allWorkbenchTasks().length'), before);
+  assert.equal(w.run("documentById('doc-qa').content"), '完成设备验收');
 });

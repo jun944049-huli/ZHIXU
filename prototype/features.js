@@ -419,41 +419,17 @@ function openNotifications() {
 }
 
 function openTextImport(target) {
-  state.importTarget = target;
-  localModal(target === 'chat' ? '添加文本附件' : '上传项目文档',
-    `<div class="field"><label for="text-file">TXT / Markdown / CSV（不超过 512 KB）</label>
-    <input class="input" type="file" id="text-file" accept=".txt,.md,.csv,text/plain,text/markdown,text/csv"></div>
-    <p class="small muted mt-12">仅保存文本内容，不执行文件中的代码或指令。</p>`,
-    '<button class="btn btn-primary" data-action="document-import">导入文本</button>');
+  openDocumentImport(target);
 }
 
 async function importTextDocument() {
-  const file = document.getElementById('text-file')?.files?.[0];
-  if (!file || !/\.(txt|md|csv)$/i.test(file.name) || file.size > 512000) { showToast('请选择不超过 512 KB 的 TXT、MD 或 CSV 文件'); return; }
-  const text = await file.text();
-  if (text.includes('\0')) { showToast('文件不是有效文本'); return; }
-  if (state.importTarget === 'chat') {
-    closeModal();
-    const input = document.getElementById('chat-input');
-    if (input) input.value = `${input.value}\n附件：${file.name}\n${text}`.trim().slice(0, 12000);
-    showToast('附件内容已加入输入框，发送前可编辑'); return;
-  }
-  const detail = editableProjectDetail();
-  if (!detail) return;
-  const total = DB.documents.reduce((sum, d) => sum + d.content.length, 0);
-  if (total + text.length > 2_000_000) { showToast('文本附件总量已达 2 MB，请导出整理后再添加'); return; }
-  const id = newRecordId('document');
-  DB.documents.push({ id, projectId: state.projectId, title: file.name, content: text, createdAt: new Date().toISOString() });
-  detail.docs.push({ id, title: file.name, icon: 'file', meta: new Date().toLocaleString('zh-CN') });
-  await finishLocal('文档已保存到项目');
+  await importDocuments();
 }
 
 function openDocument(id) {
   const doc = DB.documents.find(d => d.id === id);
-  if (!doc) { localModal('示例文档', '<p>这是原型中的示例条目，没有附带文件。请在项目文档页上传自己的文本文件。</p>'); return; }
-  state.documentId = id;
-  localModal(doc.title, `<pre class="document-content">${esc(doc.content)}</pre>`,
-    '<button class="btn" data-action="document-export">导出文本</button>');
+  if (!doc) { localModal('示例文档', '<p>这是示例条目，没有附带文件。请上传自己的项目文档。</p>'); return; }
+  openDocumentEditor(id);
 }
 
 async function saveLocalFile(payload) {
@@ -501,7 +477,8 @@ async function backupWorkbench() {
     const result = await window.xiaoyuDesktop.backup();
     if (!result.saved) return;
     DB.meta.lastBackup = new Date().toISOString();
-    await finishLocal('数据库备份已保存');
+    await finishLocal(DB.documents.some(doc => doc.assetId)
+      ? '数据库备份已保存；原附件文件夹需另行备份' : '数据库备份已保存');
   } catch { showToast('备份失败，请选择其他位置后重试'); }
 }
 
@@ -584,8 +561,16 @@ function handleFeatureAction(action, el) {
     case 'project-export': void exportProjects(); break;
     case 'document-upload': openTextImport('project'); break;
     case 'chat-attachment': openTextImport('chat'); break;
-    case 'document-import': void importTextDocument().catch(() => showToast('文件读取失败，请重新选择文本文件')); break;
+    case 'document-import': void importTextDocument().catch(error => showToast(error.message || '文件读取失败')); break;
     case 'document-open': openDocument(id); break;
+    case 'document-library': openDocumentLibrary(); break;
+    case 'document-save': void saveDocumentEditor().catch(error => showToast(error.message || '文档保存失败')); break;
+    case 'document-apply': void saveDocumentEditor(true).catch(error => showToast(error.message || '归档失败')); break;
+    case 'document-reanalyze': void reanalyzeDocument().catch(error => showToast(error.message || '分析失败')); break;
+    case 'document-reanalyze-confirm': void reanalyzeDocument(true).catch(error => showToast(error.message || '分析失败')); break;
+    case 'document-task-add': updateDocumentDraft('add'); break;
+    case 'document-task-remove': updateDocumentDraft('remove', el.dataset.index); break;
+    case 'document-original': void exportDocumentOriginal().catch(error => showToast(error.message || '原文件导出失败')); break;
     case 'document-export': {
       const doc = DB.documents.find(d => d.id === state.documentId);
       if (doc) void saveLocalFile({ title: doc.title, format: 'md', text: doc.content }); break;

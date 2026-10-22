@@ -90,6 +90,13 @@ async function deleteProject() {
   linked.forEach(item => {
     if (item.project === id) { item.previousProject = id; item.project = null; }
   });
+  (DB.documents || []).forEach(doc => {
+    if (doc.projectId === id) {
+      doc.previousProjectId = id;
+      doc.projectId = null;
+      if (doc.analysis) { doc.analysis.projectId = null; doc.analysis.proposedProjectId = ''; }
+    }
+  });
   if (DB.projectDetails) delete DB.projectDetails[id];
   if (DB.projectNotes) delete DB.projectNotes[id];
   saveProjectNotes();

@@ -4,7 +4,10 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   main: {
-    build: { rollupOptions: { external: ['node:sqlite'] } }
+    build: { rollupOptions: {
+      input: { index: resolve('src/main/index.ts'), 'document-worker': resolve('src/main/document-worker.ts') },
+      external: ['node:sqlite']
+    } }
   },
   preload: {
     build: { rollupOptions: { output: { format: 'cjs', entryFileNames: 'index.cjs' } } }

@@ -96,6 +96,25 @@ try {
   await page.locator('[data-action="inbox-archive-clear"]').click();
   await page.locator('#modal-root [data-action="inbox-archive"]').click();
   assert.equal(await page.evaluate(() => DB.inboxArchive.some(i => i.id === 'browser-archive-check')), true);
+  await page.locator('#modal-root [data-action="close-modal"]').click();
+  await page.locator('.nav [data-view="chat"]').click();
+  await page.locator('[data-action="chat-attachment"]').click();
+  await page.locator('#text-file').setInputFiles({ name: '附件编辑布局验收.md', mimeType: 'text/markdown',
+    buffer: Buffer.from('# 项目名称：移动附件验收\n完成设备清单整理\n提交验收材料') });
+  await page.locator('[data-action="document-import"]').click();
+  await page.locator('.document-editor').waitFor();
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await finishAnimations();
+    const dimensions = await page.locator('.document-editor').evaluate(element => ({
+      left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right,
+      bodyWidth: element.querySelector('.modal-body').clientWidth,
+      bodyScroll: element.querySelector('.modal-body').scrollWidth
+    }));
+    assert.ok(dimensions.left >= 0 && dimensions.right <= width && dimensions.bodyScroll <= dimensions.bodyWidth + 1,
+      'document editor: ' + JSON.stringify(dimensions));
+    await page.screenshot({ path: resolve(evidence, `browser-document-${width}.png`) });
+  }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: true, projectId, overflow }));
 } finally {

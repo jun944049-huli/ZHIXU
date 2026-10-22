@@ -183,7 +183,8 @@ function renderChat() {
           <div class="composer-box">
             <textarea id="chat-input" rows="2" placeholder="直接说：把星火项目进展更新到 80%，测试库风险升到高……"></textarea>
             <div class="composer-bar">
-              <button class="icon-btn sm" data-action="chat-attachment" title="添加文本附件" aria-label="添加文本附件">${icon('plus', 14)}</button>
+              <button class="icon-btn sm" data-action="chat-attachment" title="上传附件" aria-label="上传附件">${icon('plus', 14)}</button>
+              <button class="icon-btn sm" data-action="document-library" title="附件记录与待确认项目" aria-label="附件记录与待确认项目">${icon('file', 14)}</button>
               <select class="chat-select" id="chat-context" aria-label="参考范围">
                 ${contexts.map(c => `<option value="${c.id}" ${state.chatContext === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
               </select>

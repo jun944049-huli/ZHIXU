@@ -401,6 +401,13 @@ function handleKeydown(e) {
 }
 
 function handleChange(e) {
+  if (e.target.id === 'document-project') {
+    const name = document.getElementById('document-project-name');
+    if (name) name.disabled = e.target.value !== 'new';
+    const apply = document.querySelector('[data-action="document-apply"]');
+    if (apply) apply.textContent = e.target.value === 'new' ? '创建项目并归档' : '确认归档并保存任务';
+    return;
+  }
   if (e.target.id === 'profile-period') {
     state.profileDays = e.target.value;
     render();

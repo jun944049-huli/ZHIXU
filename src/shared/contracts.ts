@@ -53,4 +53,40 @@ export interface DesktopAPI {
   integration(payload: unknown): Promise<IntegrationResult>;
   exportFile(payload: unknown): Promise<{ saved: boolean }>;
   backup(): Promise<{ saved: boolean }>;
+  importDocument(payload: unknown): Promise<{ assetId: string; text: string; warnings: string[] }>;
+  analyzeDocument(payload: unknown): Promise<DocumentAnalysis>;
+  exportOriginal(payload: unknown): Promise<{ saved: boolean }>;
 }
+
+export const documentInputSchema = z.object({
+  name: z.string().min(1).max(240),
+  bytes: z.instanceof(Uint8Array).refine(value => value.byteLength > 0 && value.byteLength <= 20 * 1024 * 1024,
+    '文件须为 1 字节至 20 MB')
+});
+
+export const documentAnalysisSchema = z.object({
+  summary: z.string().max(6000),
+  projectId: z.string().max(150).nullable(),
+  projectName: z.string().max(150),
+  tasks: z.array(z.object({
+    title: z.string().trim().min(1).max(200),
+    assignee: z.string().max(100),
+    due: z.union([z.iso.date(), z.literal('')]),
+    priority: z.enum(['P0', 'P1', 'P2', 'P3', 'P4']),
+    estimateHours: z.number().min(0).max(200),
+    evidence: z.string().trim().min(1).max(1000)
+  })).max(80)
+});
+export type DocumentAnalysis = z.infer<typeof documentAnalysisSchema> & {
+  mode: string;
+  warnings: string[];
+};
+
+export const analyzeDocumentSchema = z.object({
+  text: z.string().trim().min(1).max(120000),
+  name: z.string().min(1).max(240),
+  today: z.iso.date(),
+  instructions: z.string().max(4000),
+  projects: z.array(z.object({ id: z.string().max(150), name: z.string().max(150) })).max(500),
+  provider: polishSchema.omit({ text: true, tone: true }).optional()
+});

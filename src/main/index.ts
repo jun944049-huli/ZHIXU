@@ -5,6 +5,9 @@ import { WorkbenchStore } from './database';
 import { polish } from './polish';
 import { runIntegration } from './integrations';
 import { exportBuffer, exportSchema, reportHTML } from './exports';
+import { DocumentFiles } from './document-files';
+import { analyzeDocument } from './document-analysis';
+import { z } from 'zod';
 
 let store: WorkbenchStore;
 let window: BrowserWindow | null = null;
@@ -82,6 +85,29 @@ else {
     ipcMain.handle('workbench:polish', (event, payload: unknown) => {
       checkSender(event);
       return polish(payload);
+    });
+    const documents = new DocumentFiles(join(dataDir, 'attachments'));
+    let documentImportBusy = false;
+    ipcMain.handle('workbench:document-import', async (event, payload: unknown) => {
+      checkSender(event);
+      if (documentImportBusy) throw new Error('正在处理另一份附件，请稍候');
+      documentImportBusy = true;
+      try { return await documents.import(payload); }
+      finally { documentImportBusy = false; }
+    });
+    ipcMain.handle('workbench:document-analyze', (event, payload: unknown) => {
+      checkSender(event);
+      return analyzeDocument(payload);
+    });
+    ipcMain.handle('workbench:document-original', async (event, input: unknown) => {
+      checkSender(event);
+      const payload = z.object({ assetId: z.string().max(100), name: z.string().max(240) }).parse(input);
+      const result = await dialog.showSaveDialog(window!, {
+        title: '导出原文件', defaultPath: payload.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+      });
+      if (result.canceled || !result.filePath) return { saved: false };
+      await documents.export(payload.assetId, result.filePath);
+      return { saved: true };
     });
     const activeIntegrations = new Set<string>();
     ipcMain.handle('workbench:integration', async (event, payload: unknown) => {

@@ -5,7 +5,7 @@ import '../../../prototype/styles.css';
 const scripts = [
   'data.js', 'storage.js', 'shared.js', 'views-core.js', 'views-chat.js',
   'views-project.js', 'views-output.js', 'modals.js', 'operations.js', 'integrations.js',
-  'features.js', 'analytics.js', 'app.js'
+  'features.js', 'analytics.js', 'documents.js', 'app.js'
 ];
 
 function Workbench() {
