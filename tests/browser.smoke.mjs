@@ -228,6 +228,8 @@ try {
     render();
   });
   const chatLayouts = [];
+  assert.equal(await page.locator('.chat-safety').count(), 0);
+  assert.equal(await page.locator('.chat-rail > .card').count(), 2);
   for (const viewport of [{ width: 1920, height: 1080 }, { width: 1440, height: 900 },
     { width: 1280, height: 720 }, { width: 390, height: 844 },
     { width: 390, height: 600 }, { width: 844, height: 390 }]) {
@@ -257,6 +259,13 @@ try {
     const after = await page.locator('.chat-composer').boundingBox();
     assert.ok(Math.abs(before.y - after.y) <= 1 && Math.abs(before.height - after.height) <= 1);
     assert.equal(await page.evaluate(() => scrollY), 0);
+    await page.locator('.chat-page-head').hover();
+    await page.mouse.wheel(0, 800);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.deepEqual(await page.evaluate(() => ({
+      top: scrollY, root: getComputedStyle(document.documentElement).overflowY,
+      body: getComputedStyle(document.body).overflowY
+    })), { top: 0, root: 'hidden', body: 'hidden' });
     if (await page.locator('.chat-rail').isVisible()) {
       await page.locator('.chat-rail').hover();
       await page.mouse.wheel(0, 1200);

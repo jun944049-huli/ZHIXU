@@ -57,6 +57,6 @@ export async function chat(value: unknown): Promise<ChatResult> {
   }
   if (reply.length > 60000) throw new Error('模型回答过长，请缩小本次问题范围后重试');
   return { reply, actions, warnings: [...new Set(warnings)],
-    model: typeof result.model === 'string' ? result.model.slice(0, 120) : input.provider.model,
+    model: typeof result.model === 'string' && result.model.trim() ? result.model.trim().slice(0, 120) : input.provider.model,
     provider: input.provider.name };
 }

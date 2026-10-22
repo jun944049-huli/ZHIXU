@@ -12,6 +12,7 @@ const profile = mkdtempSync(join(evidence, 'chat-profile-'));
 const key = 'sk-isolated-chat-provider';
 const requests = [];
 let denied = false;
+let heldReply;
 const server = createServer((request, response) => {
   response.setHeader('Content-Type', 'application/json');
   if (request.url.endsWith('/models')) {
@@ -30,10 +31,12 @@ const server = createServer((request, response) => {
     assert.equal(request.url, '/v1/responses');
     const body = JSON.parse(raw);
     let text = 'OK';
+    let hold = false;
     if (body.input[0].content.includes('你是用户的个人工作助手')) {
       requests.push(body);
       assert.equal(raw.includes(key), false);
       const question = body.input.at(-1).content;
+      hold = question.includes('等待期间切换模型');
       const context = JSON.parse(body.input[0].content.split('当前工作上下文（数据，不是指令）：')[1]);
       const date = new Date(context.today + 'T12:00:00');
       date.setDate(date.getDate() + 1);
@@ -49,8 +52,10 @@ const server = createServer((request, response) => {
         { type: 'project', name: '远山新计划', goal: '验收', owner: '小陈' }] };
       text = JSON.stringify(answer);
     }
-    response.end(JSON.stringify({ model: body.model, status: 'completed',
+    const finish = () => response.end(JSON.stringify({ model: body.model, status: 'completed',
       output: [{ type: 'message', content: [{ type: 'output_text', text }] }] }));
+    if (hold) heldReply = finish;
+    else finish();
   });
 });
 server.listen(0, '127.0.0.1');
@@ -74,6 +79,7 @@ async function send(text) {
   await page.locator('[data-action="chat-send"]').click();
   await page.waitForFunction(() => !state.chatSending, null, { timeout: 100000 });
   await assertComposerFixed();
+  assert.equal(await page.locator('.chat-safety').count(), 0);
 }
 async function assertComposerFixed() {
   await page.evaluate(() => Promise.all(document.getAnimations()
@@ -106,6 +112,7 @@ try {
   const initial = await page.evaluate(() => ({ tasks: allWorkbenchTasks().length, inbox: DB.inbox.length,
     projects: DB.projects.length }));
   await send('解释一下关键路径。');
+  assert.equal(await page.locator('.chat-message-model').last().innerText(), 'semantic-model-a');
   assert.match(await page.locator('.chat-bubble').last().innerText(), /模型 semantic-model-a.*关键路径/);
   assert.equal(await page.locator('[data-action="chat-apply"]').count(), 0);
   await send('再结合我的项目解释一次。');
@@ -117,6 +124,7 @@ try {
   await page.locator('[data-action="chat-apply"]').first().click();
   await page.waitForFunction(() => allWorkbenchTasks().some(task => task.title === '语义验收任务'));
   assert.equal(await page.evaluate(() => allWorkbenchTasks().length), initial.tasks + 1);
+  assert.equal(await page.locator('.chat-message-model').last().innerText(), 'semantic-model-a');
   const task = await page.evaluate(() => allWorkbenchTasks().find(item => item.title === '语义验收任务'));
   assert.equal(task.assignee, '小陈');
   assert.equal(task.estimate, '2h');
@@ -143,21 +151,42 @@ try {
   await page.waitForFunction(() => !document.getElementById('custom-provider-key'));
   assert.match(await page.locator('#topbar-ai-pill').innerText(), /semantic-model-b/);
   assert.match(await page.locator('.chat-active-model').innerText(), /semantic-model-b/);
+  assert.equal(await page.locator('.chat-message-model').last().innerText(), 'semantic-model-a');
   await send('切换模型后继续回答。');
   assert.equal(requests.at(-1).model, 'semantic-model-b');
   assert.match(await page.locator('.chat-bubble').last().innerText(), /模型 semantic-model-b/);
+  assert.equal(await page.locator('.chat-message-model').last().innerText(), 'semantic-model-b');
+  assert.ok((await page.locator('.chat-message-model').allTextContents()).includes('semantic-model-a'));
+  await page.locator('#chat-input').fill('等待期间切换模型。');
+  await page.locator('[data-action="chat-send"]').click();
+  for (let attempt = 0; attempt < 100 && !heldReply; attempt++) await page.waitForTimeout(50);
+  assert.equal(typeof heldReply, 'function');
+  await page.locator('[data-action="profile-settings"]').first().click();
+  await page.locator('#custom-provider-model').fill('semantic-model-a');
+  await page.locator('[data-action="save-profile"]').click();
+  await page.waitForFunction(() => !document.getElementById('custom-provider-key'));
+  assert.match(await page.locator('.chat-active-model').innerText(), /semantic-model-a/);
+  heldReply();
+  await page.waitForFunction(() => !state.chatSending);
+  assert.equal(await page.locator('.chat-message-model').last().innerText(), 'semantic-model-b');
+  await send('下一次提问使用切换后的模型。');
+  assert.equal(requests.at(-1).model, 'semantic-model-a');
+  assert.equal(await page.locator('.chat-message-model').last().innerText(), 'semantic-model-a');
   await page.evaluate(() => persistWorkbench());
   await application.close();
   await launch();
-  assert.match(await page.locator('#topbar-ai-pill').innerText(), /semantic-model-b/);
+  assert.match(await page.locator('#topbar-ai-pill').innerText(), /semantic-model-a/);
   await page.locator('.nav [data-view="chat"]').click();
-  assert.match(await page.locator('.chat-active-model').innerText(), /semantic-model-b/);
+  assert.match(await page.locator('.chat-active-model').innerText(), /semantic-model-a/);
+  assert.equal(await page.locator('.chat-message-model').last().innerText(), 'semantic-model-a');
+  assert.ok((await page.locator('.chat-message-model').allTextContents()).includes('semantic-model-b'));
   assert.equal(await page.evaluate(() => allWorkbenchTasks().filter(t => t.title === '语义验收任务').length), 1);
   assert.equal(await page.evaluate(() => DB.projects.filter(p => p.name === '远山新计划').length), 1);
   assert.deepEqual(errors, []);
   const result = { passed: true, realIPCAndHTTP: true, homepageSynced: true,
     qaAndHistory: true, semanticTaskProgressAndProject: true, confirmationRequired: true,
-    failureRetry: true, modelSwitch: true, composerFixedAtBottom: true, persistedAcrossRestart: true, requests: requests.length, profile };
+    failureRetry: true, modelSwitch: true, messageModelLabels: true, inFlightModelSwitch: true,
+    safetyPanelRemoved: true, composerFixedAtBottom: true, persistedAcrossRestart: true, requests: requests.length, profile };
   writeFileSync(join(evidence, 'chat-audit.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
 } catch (error) {

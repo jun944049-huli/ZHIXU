@@ -80,6 +80,36 @@ test('model chat is a real bridge call, retains failed questions and retries wit
   assert.equal(w.run('DB.inbox.length'), before);
 });
 
+test('message model identity survives switching during a request and confirming older proposals', async () => {
+  const w = workbench();
+  w.fields['chat-input'] = { value: '请求模型甲', checkValidity: () => true };
+  w.run(`DB.settings.aiProvider='custom'; DB.settings.customProvider={
+    name:'供应商',baseUrl:'http://127.0.0.1',apiKey:'isolated',model:'model-a'};
+    window.xiaoyuDesktop={chat:()=>new Promise(resolve=>{window.finishReply=resolve})};`);
+  const pending = w.run('sendChat()');
+  w.run(`DB.settings.customProvider.model='model-b'; state.chatModel=chatModelLabel();
+    window.finishReply({reply:'甲的回复',model:'model-a',warnings:[],actions:[
+      {type:'progress',projectId:'p1',progress:50}]});`);
+  await pending;
+  assert.equal(w.run('state.chatMessages.at(-1).model'), 'model-a');
+  assert.match(w.run('renderChatMessage(state.chatMessages.at(-1))'), /title="model-a">model-a<\/span>/);
+  w.run("window.xiaoyuDesktop.chat=async()=>({reply:'乙的回复',model:' ',actions:[],warnings:[]})");
+  w.fields['chat-input'].value = '请求模型乙';
+  await w.run('sendChat()');
+  assert.equal(w.run('state.chatMessages.at(-1).model'), 'model-b');
+  assert.match(w.run('renderChatMessage(state.chatMessages.at(-1))'), /title="model-b">model-b<\/span>/);
+  const cardId = w.run('state.chatMessages.find(m=>m.actionCard).actionCard.id');
+  await w.run(`applyChatAction('', ${JSON.stringify(cardId)})`);
+  assert.equal(w.run('state.chatMessages.at(-1).model'), 'model-a');
+  w.run(`state.chatMessages.push({role:'assistant',model:'model-a',actionCard:modelChatCard({
+    type:'progress',projectId:'p1',progress:70},'待取消')}); cancelChat();`);
+  assert.equal(w.run('state.chatMessages.at(-1).model'), 'model-a');
+  assert.match(w.run("renderChatMessage({role:'assistant',text:'旧记录',time:'过去'})"), /来源未记录/);
+  assert.equal(w.run("renderChatMessage({role:'assistant',text:'旧记录',time:'过去'}).includes('model-b')"), false);
+  assert.match(w.run("renderChatMessage({role:'assistant',model:'<model>',text:'正文',time:'现在'})"), /&lt;model&gt;/);
+  assert.equal(w.run("renderChat().includes('chat-safety')"), false);
+});
+
 test('model proposals create tasks, risks and projects only on explicit, idempotent confirmation', async () => {
   const w = workbench();
   const tasks = w.run('allWorkbenchTasks().length'), projects = w.run('DB.projects.length');

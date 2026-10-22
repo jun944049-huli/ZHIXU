@@ -2408,6 +2408,7 @@ h3 { font-size: 13px; font-weight: 650; }
   letter-spacing: .02em;
 }
 
+html[data-view="chat"], body[data-view="chat"] { height: 100%; overflow: hidden; overscroll-behavior: none; }
 body[data-view="chat"] .app { height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
 body[data-view="chat"] .main { min-height: 0; }
 body[data-view="chat"] .sidebar { height: 100%; }
@@ -2523,6 +2524,8 @@ body[data-view="chat"] .sidebar { height: 100%; }
   color: var(--accent-ink);
 }
 .chat-meta {
+  max-width: 100%;
+  overflow-wrap: anywhere;
   font-size: 9.5px;
   letter-spacing: .01em;
   color: var(--ink-3);
@@ -2858,8 +2861,6 @@ body[data-view="chat"] .sidebar { height: 100%; }
   font-weight: 650;
   white-space: nowrap;
 }
-.chat-safety { background: color-mix(in srgb, var(--surface) 88%, var(--green) 12%); }
-.chat-safety p { margin-top: 5px; font-size: 11.5px; color: var(--ink-2); line-height: 1.55; }
 
 /* =========================================================
    Polish & quick commands

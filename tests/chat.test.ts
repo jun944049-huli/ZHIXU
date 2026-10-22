@@ -7,6 +7,7 @@ import { chat } from '../src/main/chat';
 test('Q&A and semantic commands use the selected model with history and validated proposals', async () => {
   const bodies: any[] = [];
   let status = 200;
+  let returnedModel = 'selected-model';
   let answer: unknown = { reply: '这是模型对问题的回答。', actions: [] };
   const server = createServer((request, response) => {
     let body = '';
@@ -20,7 +21,7 @@ test('Q&A and semantic commands use the selected model with history and validate
       response.statusCode = status;
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify(status === 200 ? {
-        model: 'selected-model',
+        model: returnedModel,
         ...(isResponses ? { output: [{ content: [{ type: 'output_text',
           text: typeof answer === 'string' ? answer : JSON.stringify(answer) }] }] } :
           { choices: [{ message: { content: typeof answer === 'string' ? answer : JSON.stringify(answer) } }] })
@@ -67,6 +68,10 @@ test('Q&A and semantic commands use the selected model with history and validate
 
     answer = '普通文本回答也能正常展示。';
     assert.equal((await chat(input)).reply, answer);
+    returnedModel = ' actual-runtime-model ';
+    assert.equal((await chat(input)).model, 'actual-runtime-model');
+    returnedModel = ' ';
+    assert.equal((await chat(input)).model, 'selected-model');
     answer = '{"reply":"被截断';
     await assert.rejects(chat(input), /结构不完整.*尚未执行/);
     status = 401;
@@ -76,6 +81,6 @@ test('Q&A and semantic commands use the selected model with history and validate
       return true;
     });
     await assert.rejects(chat({ ...input, messages: [{ role: 'assistant', content: '不应由助手结束' }] }), /用户问题/);
-    assert.equal(bodies.length, 5);
+    assert.equal(bodies.length, 7);
   } finally { server.closeAllConnections(); server.close(); }
 });

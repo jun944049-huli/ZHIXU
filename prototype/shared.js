@@ -18,7 +18,7 @@ const state = {
   impactOption: 'scope',
   profileDraft: { color: '' },
   chatMessages: null,
-  chatModel: 'DeepSeek',
+  chatModel: '本地规则',
   chatContext: 'auto',
   chatSending: false,
   chatRequestId: 0,

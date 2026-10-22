@@ -117,7 +117,9 @@ function renderChatMessage(m) {
   const avatar = isUser
     ? `<span class="chat-avatar user" style="background:${DB.user.color}">${esc(DB.user.initials)}</span>`
     : `<span class="chat-avatar ai">${icon('sparkles', 14)}</span>`;
-  const meta = isUser ? `你 · ${esc(m.time)}` : `${esc(assistantName())} · ${esc(m.model || state.chatModel)} · ${esc(m.time)}`;
+  const model = String(m.model || '').trim() || '来源未记录';
+  const meta = isUser ? `你 · ${esc(m.time)}` :
+    `${esc(assistantName())} · <span class="chat-message-model" title="${esc(model)}">${esc(model)}</span> · ${esc(m.time)}`;
   const text = isUser
     ? String(m.text || '')
     : String(m.text || '').replace(/^早上好，[^。]+。/, `早上好，${DB.user.name}。`);
@@ -226,13 +228,6 @@ function renderChat() {
           </div>
         </div>
 
-        <div class="card chat-safety">
-          <div class="panel-body">
-            <div class="eyebrow">安全边界</div>
-            <p>${hasAIProvider() ? '当前问题、近期对话及相关工作摘要会发送到所选供应商；密钥不会加入对话正文。' : '尚未配置模型，当前使用本地任务规则。'}</p>
-            <div class="tiny muted mt-8">模型提出的项目与任务修改，确认后才写入。</div>
-          </div>
-        </div>
       </aside>
     </div>
   `;
@@ -539,12 +534,13 @@ async function sendChat(retryId = '') {
           protocol: provider.protocol || 'auto', name: provider.name },
         messages: history, context: modelChatContext()
       });
+      const model = String(result.model || '').trim() || provider.model;
       const cards = result.actions.map(action => modelChatCard(action, text)).filter(Boolean);
-      const reply = { role: 'assistant', time: '现在', model: result.model,
+      const reply = { role: 'assistant', time: '现在', model,
         text: result.reply + (result.warnings.length ? '\n\n' + result.warnings.join('\n') : '') };
       if (cards.length) reply.actionCard = cards[0];
       replies = [reply, ...cards.slice(1).map(actionCard => ({
-        role: 'assistant', time: '现在', model: result.model, text: '另有一项待确认操作。', actionCard
+        role: 'assistant', time: '现在', model, text: '另有一项待确认操作。', actionCard
       }))];
     }
     if (state.chatRequestId !== requestId) return;
@@ -642,7 +638,7 @@ async function applyChatAction(mode, cardId) {
     if (logged) cardMsg.loggedNote = { projectId: p.id, projectName: p.name, text: logged.note.text };
   }
   state.chatMessages.push({
-    role: 'assistant', time: '现在', model: state.chatModel,
+    role: 'assistant', time: '现在', model: cardMsg.model || '来源未记录',
     text: summary + '\n要不要我顺手写进今天的日报？',
     quick: [{ label: '写进日报', view: 'reports' }, { label: '查看今日', view: 'today' }]
   });
@@ -661,7 +657,7 @@ function cancelChat(cardId) {
     m.actionCard.status === 'pending' && (!cardId || m.actionCard.id === cardId));
   if (cardMsg) cardMsg.actionCard.status = 'cancelled';
   state.chatMessages.push({
-    role: 'assistant', time: '现在', model: state.chatModel,
+    role: 'assistant', time: '现在', model: cardMsg?.model || '系统',
     text: '好的，不改。需要的话我可以先放到收件箱，等你之后再定。'
   });
   saveChatHistory();
