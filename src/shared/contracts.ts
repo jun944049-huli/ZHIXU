@@ -51,12 +51,14 @@ export interface DesktopAPI {
   load(): Promise<WorkbenchSnapshot | null>;
   save(snapshot: WorkbenchSnapshot): Promise<void>;
   polish(payload: unknown): Promise<{ text: string; model: string; provider: string }>;
+  chat(payload: unknown): Promise<ChatResult>;
   providerModels(payload: unknown): Promise<{ models: string[]; endpoint: string }>;
   providerDiagnose(payload: unknown): Promise<ProviderDiagnosis>;
   integration(payload: unknown): Promise<IntegrationResult>;
   exportFile(payload: unknown): Promise<{ saved: boolean }>;
   backup(): Promise<{ saved: boolean }>;
-  importDocument(payload: unknown): Promise<{ assetId: string; text: string; warnings: string[] }>;
+  importDocument(payload: unknown): Promise<ImportedDocument>;
+  reparseDocument(payload: unknown): Promise<ImportedDocument>;
   analyzeDocument(payload: unknown): Promise<DocumentAnalysis>;
   exportOriginal(payload: unknown): Promise<{ saved: boolean }>;
 }
@@ -85,10 +87,18 @@ export interface ProviderDiagnosis {
   suggestion: string;
 }
 
+export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
+export const MAX_DOCUMENT_TEXT = 1_000_000;
+export interface ImportedDocument {
+  assetId: string;
+  text: string;
+  warnings: string[];
+  parseError?: string;
+}
 export const documentInputSchema = z.object({
   name: z.string().min(1).max(240),
-  bytes: z.instanceof(Uint8Array).refine(value => value.byteLength > 0 && value.byteLength <= 20 * 1024 * 1024,
-    '文件须为 1 字节至 20 MB')
+  bytes: z.instanceof(Uint8Array).refine(value => value.byteLength > 0 && value.byteLength <= MAX_DOCUMENT_BYTES,
+    '文件须为 1 字节至 50 MB')
 });
 
 export const documentAnalysisSchema = z.object({
@@ -110,10 +120,43 @@ export type DocumentAnalysis = z.infer<typeof documentAnalysisSchema> & {
 };
 
 export const analyzeDocumentSchema = z.object({
-  text: z.string().trim().min(1).max(120000),
+  text: z.string().trim().min(1).max(MAX_DOCUMENT_TEXT),
   name: z.string().min(1).max(240),
   today: z.iso.date(),
   instructions: z.string().max(4000),
   projects: z.array(z.object({ id: z.string().max(150), name: z.string().max(150) })).max(500),
   provider: polishSchema.omit({ text: true, tone: true }).optional()
 });
+
+const optionalDate = z.union([z.iso.date(), z.literal('')]).default('');
+const projectReference = z.string().min(1).max(150).nullable().default(null);
+export const chatActionSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('task'), projectId: projectReference, title: z.string().trim().min(1).max(200),
+    due: optionalDate, date: optionalDate, assignee: z.string().max(100).default(''),
+    estimateHours: z.number().min(0).max(200).default(0), priority: z.enum(['P0', 'P1', 'P2', 'P3', 'P4']).default('P2') }),
+  z.object({ type: z.literal('progress'), projectId: z.string().min(1).max(150),
+    progress: z.number().int().min(0).max(100) }),
+  z.object({ type: z.literal('risk'), projectId: z.string().min(1).max(150),
+    title: z.string().trim().min(1).max(150), level: z.enum(['低', '中', '高']) }),
+  z.object({ type: z.literal('capture'), projectId: projectReference, title: z.string().trim().min(1).max(500) }),
+  z.object({ type: z.literal('project'), name: z.string().trim().min(1).max(150),
+    goal: z.string().max(2000).default(''), owner: z.string().max(100).default('') })
+]);
+export type ChatAction = z.infer<typeof chatActionSchema>;
+export const chatRequestSchema = z.object({
+  provider: providerSchema.extend({ name: z.string().max(60).default('自定义供应商') }),
+  messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().min(1).max(20000) })).min(1).max(24),
+  context: z.object({
+    today: z.iso.date(),
+    selectedProjectId: projectReference,
+    projects: z.array(z.object({ id: z.string().max(150), name: z.string().max(150) })).max(500),
+    data: z.string().max(100000)
+  })
+});
+export interface ChatResult {
+  reply: string;
+  actions: ChatAction[];
+  model: string;
+  provider: string;
+  warnings: string[];
+}

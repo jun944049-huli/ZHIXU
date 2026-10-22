@@ -11,9 +11,10 @@ function workbench() {
   const preferences: Record<string, string> = {};
   const context = createContext({
     crypto: webcrypto, console, setTimeout, clearTimeout,
+    window: {},
     storageGet: () => null,
     storageSet: (key: string, value: string) => { preferences[key] = value; },
-    document: { getElementById: (id: string) => fields[id] || null },
+    document: { getElementById: (id: string) => fields[id] || null, querySelector: () => null },
     render: () => {}, closeModal: () => {}, showToast: () => {},
     scrollChatToBottom: () => {},
     persistWorkbench: async () => { saved.push(runInContext('JSON.stringify(DB)', context)); }
@@ -46,6 +47,62 @@ test('project removal preserves linked tasks across all dates and archives notes
   assert.equal(w.saved.length, 1);
   assert.equal(w.run("documentById('linked-doc').projectId"), null);
   assert.equal(w.run("documentById('linked-doc').content"), '保留附件正文');
+});
+
+test('model chat is a real bridge call, retains failed questions and retries without local fallback', async () => {
+  const w = workbench();
+  w.fields['chat-input'] = { value: '解释关键路径', checkValidity: () => true };
+  const before = w.run('DB.inbox.length');
+  w.run(`DB.settings.aiProvider='custom'; DB.settings.customProvider={
+    name:'验收模型',baseUrl:'http://127.0.0.1',apiKey:'secret',model:'semantic-model',protocol:'responses'};
+    window.xiaoyuDesktop={chat:async payload=>{
+      window.lastPayload=payload;
+      return {reply:'关键路径决定最早交付时间',actions:[],warnings:[],model:'semantic-model'};
+    }};`);
+  await w.run('sendChat()');
+  assert.equal(w.run('state.chatMessages.at(-1).text'), '关键路径决定最早交付时间');
+  assert.equal(w.run('window.lastPayload.provider.model'), 'semantic-model');
+  assert.equal(w.run('window.lastPayload.messages.at(-1).content'), '解释关键路径');
+  assert.equal(w.run('DB.inbox.length'), before);
+  assert.equal(w.run('chatModelLabel()'), '验收模型 · semantic-model');
+  w.run("window.xiaoyuDesktop.chat=async()=>{throw new Error('HTTP 401: 鉴权失败')}");
+  w.fields['chat-input'].value = '再解释一下';
+  await w.run('sendChat()');
+  assert.match(w.run('state.chatMessages.at(-1).text'), /401/);
+  assert.equal(w.run('state.chatMessages.at(-1).actionCard'), undefined);
+  assert.equal(w.run('state.chatSending'), false);
+  const id = w.run('state.chatMessages.at(-1).retryOf');
+  w.run("window.xiaoyuDesktop.chat=async()=>({reply:'恢复后的模型回答',actions:[],warnings:[],model:'semantic-model'})");
+  await w.run(`sendChat(${JSON.stringify(id)})`);
+  assert.equal(w.run("state.chatMessages.filter(m=>m.role==='user' && m.text==='再解释一下').length"), 1);
+  assert.equal(w.run('state.chatMessages.at(-1).text'), '恢复后的模型回答');
+  assert.equal(w.run('state.chatMessages.some(m=>m.retryOf)'), false);
+  assert.equal(w.run('DB.inbox.length'), before);
+});
+
+test('model proposals create tasks, risks and projects only on explicit, idempotent confirmation', async () => {
+  const w = workbench();
+  const tasks = w.run('allWorkbenchTasks().length'), projects = w.run('DB.projects.length');
+  w.run(`state.chatMessages=[{actionCard:modelChatCard({
+    type:'task',title:'语义验收',projectId:'p1',date:'2030-02-05',due:'2030-02-06',
+    assignee:'小陈',estimateHours:0,priority:'P2'},'明天交给小陈验收')}];`);
+  assert.equal(w.run('allWorkbenchTasks().length'), tasks);
+  await w.run('applyChatAction()');
+  await w.run('applyChatAction()');
+  assert.equal(w.run('allWorkbenchTasks().length'), tasks + 1);
+  assert.equal(w.run("DB.taskCalendar['2030-02-05'][0].assignee"), '小陈');
+  assert.equal(w.run("DB.taskCalendar['2030-02-05'][0].estimate"), '待估时');
+  assert.equal(w.run("DB.taskCalendar['2030-02-05'][0].due"), '2030-02-06');
+  w.run(`state.chatMessages=[{actionCard:modelChatCard({
+    type:'risk',projectId:'p1',title:'新的供应风险',level:'低'},'记录低风险')}];`);
+  await w.run('applyChatAction()');
+  assert.equal(w.run("DB.projectDetails.p1.risks.find(r=>r.title==='新的供应风险').level"), '低');
+  w.run("state.chatMessages=[{actionCard:modelChatCard({type:'project',name:'语义新项目',goal:'验收',owner:'小陈'},'建项目')}];");
+  assert.equal(w.run('DB.projects.length'), projects);
+  await w.run('applyChatAction()');
+  await w.run('applyChatAction()');
+  assert.equal(w.run('DB.projects.length'), projects + 1);
+  assert.equal(w.run("DB.projects.at(-1).owner"), '小陈');
 });
 
 test('removing the last project leaves both portfolio and stale detail routes usable', async () => {

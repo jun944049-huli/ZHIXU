@@ -136,7 +136,7 @@ function detectAIProvider(baseUrl, model) {
 function aiProviderConfig() {
   const s = DB.settings || {};
   const custom = s.customProvider || {};
-  if (s.aiProvider === 'custom' && custom.apiKey && custom.baseUrl && custom.model) {
+  if ((!s.aiProvider || s.aiProvider === 'custom') && custom.apiKey && custom.baseUrl && custom.model) {
     return {
       id: 'custom',
       name: custom.name || custom.detected || '自定义供应商',
@@ -171,6 +171,7 @@ function hasAIProvider() {
 
 function refreshAIProviderUI() {
   const cfg = aiProviderConfig();
+  state.chatModel = cfg.id === 'local' ? '本地规则' : cfg.name + ' · ' + cfg.model;
   const nameEl = document.getElementById('sidebar-ai-name');
   const statusEl = document.getElementById('sidebar-ai-status');
   const pulse = document.getElementById('sidebar-ai-pulse');

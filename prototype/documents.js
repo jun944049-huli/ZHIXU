@@ -14,7 +14,7 @@ function openDocumentImport(target = 'chat') {
   state.importProjectId = target === 'project' ? projectById(state.projectId)?.id || '' :
     projectById(state.chatContext)?.id || '';
   localModal('上传并分析附件', `<div class="form-grid">
-    <div class="field full"><label for="text-file">Word / Excel / PDF / PowerPoint / 文本 · 每个文件不超过 20 MB</label>
+    <div class="field full"><label for="text-file">Word / Excel / PDF / PowerPoint / 文本 · 每个文件不超过 50 MB</label>
     <input class="input" type="file" id="text-file" multiple accept=".doc,.docx,.xlsx,.pdf,.pptx,.txt,.md,.csv"></div>
     ${selectField('import-project', '项目归属', [['', '自动识别；新项目待确认'], ...DB.projects.map(p => [p.id, p.name])], state.importProjectId)}
     ${selectField('document-engine', '分析方式', documentEngineChoices(), hasAIProvider() ? 'ai' : 'local')}
@@ -22,7 +22,7 @@ function openDocumentImport(target = 'chat') {
     </div><p class="small muted mt-12">${window.xiaoyuDesktop?.importDocument
       ? '支持 DOC、DOCX、XLSX、PDF、PPTX、TXT、MD、CSV。旧版 XLS、PPT 请先另存为 XLSX、PPTX。'
       : '浏览器预览支持文本；Word、Excel、PDF 和 PPTX 请使用桌面版。'}</p>
-    <p class="small muted mt-12">已有项目自动归档并生成任务；新项目等待明确确认。扫描 PDF 如无文本层，需要先进行 OCR。</p>
+    <p class="small muted mt-12">原文件先保存，再解析正文。解析失败可从附件记录重新解析或导出原文件。扫描 PDF 需先 OCR。</p>
     <p class="small muted mt-12">选择 AI 时，正文会发送到已配置的供应商；本地规则只提取行动语句，自定义分析指令由 AI 处理。</p>
     <div id="document-import-status" class="small mt-12" role="status" aria-live="polite"></div>
     <div id="document-import-results" class="document-import-results"></div>`,
@@ -31,6 +31,7 @@ function openDocumentImport(target = 'chat') {
 }
 
 async function analyzeImportedDocument(doc) {
+  if (doc.parseError || !doc.content.trim()) throw new Error('正文尚未解析成功，请先重新解析原文件');
   const provider = aiProviderConfig();
   const input = { text: doc.content, name: doc.title, today: DB.meta.today,
     instructions: doc.instructions, projects: DB.projects.map(p => ({ id: p.id, name: p.name })) };
@@ -73,7 +74,7 @@ async function importDocuments() {
   try {
     for (const [index, file] of files.entries()) {
       const previous = results.get(file);
-      if (previous?.id && documentById(previous.id)) { imported.push(previous.id); continue; }
+      if (previous?.status === 'saved' && previous.id && documentById(previous.id)) { imported.push(previous.id); continue; }
       const status = document.getElementById('document-import-status');
       if (document.getElementById('text-file') === fileInput && status) {
         status.textContent = `正在解析和分析 ${index + 1}/${files.length}：${file.name}`;
@@ -81,7 +82,7 @@ async function importDocuments() {
       try {
         if (!/\.(doc|docx|xlsx|pdf|pptx|txt|md|csv)$/i.test(file.name)) throw new Error('格式不支持；旧版 XLS、PPT 请另存为 XLSX、PPTX');
         if (!file.size) throw new Error('文件为空，请选择包含正文的文件');
-        if (file.size > 20 * 1024 * 1024) throw new Error('文件超过 20 MB，请压缩或拆分后上传');
+        if (file.size > 50 * 1024 * 1024) throw new Error('文件超过 50 MB，请压缩或拆分后上传');
         let parsed;
         if (window.xiaoyuDesktop?.importDocument) {
           parsed = await window.xiaoyuDesktop.importDocument({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
@@ -93,35 +94,36 @@ async function importDocuments() {
         }
         const existing = parsed.assetId && DB.documents.find(doc => doc.assetId === parsed.assetId &&
           (!projectId || doc.projectId === projectId));
-        if (existing) {
+        if (existing && !existing.parseError) {
           imported.push(existing.id);
           results.set(file, { id: existing.id, status: 'saved', reason: '已存在于附件记录，未重复导入' });
           continue;
         }
-        if (DB.documents.reduce((sum, doc) => sum + doc.content.length, 0) + parsed.text.length > 1500000) {
-          throw new Error('本机文档正文总量已达上限，请先导出整理');
+        const totalLimit = window.xiaoyuDesktop ? 10000000 : 1500000;
+        if (DB.documents.reduce((sum, doc) => sum + (doc.id === existing?.id ? 0 : doc.content.length), 0) + parsed.text.length > totalLimit) {
+          throw new Error('本机文档正文总量已达上限，请先导出整理；原文件已保留在附件目录');
         }
-        const doc = { id: newRecordId('document'), projectId: null, title: file.name, content: parsed.text,
-          assetId: parsed.assetId || null, warnings: parsed.warnings || [], createdAt: new Date().toISOString(), instructions, analysisEngine };
-        // Save the source before a remote analysis; a network failure must not lose the upload.
-        DB.documents.push(doc);
+        const before = existing ? JSON.parse(JSON.stringify(existing)) : null;
+        const doc = existing || { id: newRecordId('document'), projectId: null, title: file.name, createdAt: new Date().toISOString() };
+        Object.assign(doc, { content: parsed.text, assetId: parsed.assetId || null, warnings: parsed.warnings || [],
+          instructions, analysisEngine, requestedProjectId: projectId, parseError: parsed.parseError || '' });
+        if (!existing) DB.documents.push(doc);
         try { await persistWorkbench(); }
         catch (error) {
-          DB.documents.splice(DB.documents.indexOf(doc), 1);
+          if (existing) Object.assign(existing, before);
+          else DB.documents.splice(DB.documents.indexOf(doc), 1);
           throw new Error('本地记录保存失败：' + documentFailureReason(error));
         }
         imported.push(doc.id);
-        try {
-          doc.analysis = await analyzeImportedDocument(doc);
-          doc.analysis.tasks.forEach(task => { task.id = newRecordId('draft'); task.selected = true; });
-          const matched = projectId || doc.analysis.projectId;
-          if (matched && projectById(matched)) await applyDocumentToProject(doc, matched);
-          else await persistWorkbench();
-        } catch (error) {
-          doc.warnings.push('自动分析未完成，原文件已保存：' + documentFailureReason(error));
-          try { await persistWorkbench(); }
-          catch { doc.warnings.push('分析结果暂未写入数据库，请检查磁盘空间后重试保存。'); }
+        if (doc.parseError) {
+          const reason = '原文件已保存，正文解析失败：' + doc.parseError + '。可重试或从附件记录导出原文件。';
+          failures.push(`${file.name}：${reason}`);
+          results.set(file, { id: doc.id, status: 'failed', reason });
+          continue;
         }
+        if (document.getElementById('text-file') === fileInput && status) status.textContent =
+          `原文件已保存，正在分析 ${index + 1}/${files.length}：${file.name}`;
+        await finishDocumentAnalysis(doc, projectId);
         const warning = [...(doc.warnings || []), ...(doc.analysis?.warnings || [])]
           .find(message => /未完成|失败|暂未/.test(message));
         results.set(file, { id: doc.id, status: 'saved', reason: warning || '原文件与正文已保存' });
@@ -135,11 +137,11 @@ async function importDocuments() {
     if (document.getElementById('text-file') === fileInput) {
       if (failures.length) {
         document.getElementById('document-import-status').textContent =
-          `已保存 ${imported.length} 个，失败 ${failures.length} 个。所选文件已保留，可重试失败文件。`;
+          `已保存原文件 ${imported.length} 个，${failures.length} 个需重试。所选文件已保留。`;
         document.getElementById('document-import-results').innerHTML = files.map(file => {
           const result = results.get(file);
           return `<div class="document-import-result ${result.status === 'failed' ? 'failed' : 'saved'}">
-            <b>${esc(file.name)} · ${result.status === 'failed' ? '上传失败' : '已保存'}</b>
+            <b>${esc(file.name)} · ${result.status === 'failed' ? result.id ? '原文件已保存 · 解析待重试' : '上传失败' : '已保存'}</b>
             <p>${esc(result.reason)}</p>${result.id ? `<button class="btn btn-sm" data-action="document-open"
               data-id="${esc(result.id)}">查看与修改</button>` : ''}</div>`;
         }).join('');
@@ -147,11 +149,53 @@ async function importDocuments() {
       } else if (imported.length === 1) openDocumentEditor(imported[0]);
       else openDocumentLibrary();
     }
-    showToast(`已保存 ${imported.length} 个附件${failures.length ? `，${failures.length} 个失败` : ''}`);
+    showToast(`已保存 ${imported.length} 个原文件${failures.length ? `，${failures.length} 个需重试` : ''}`);
   } finally {
     state.documentImportBusy = false;
     if (button?.isConnected) button.disabled = false;
     controls.forEach(control => { if (control.isConnected) control.disabled = false; });
+  }
+}
+
+async function finishDocumentAnalysis(doc, projectId) {
+  try {
+    doc.analysis = await analyzeImportedDocument(doc);
+    doc.analysis.tasks.forEach(task => { task.id = newRecordId('draft'); task.selected = true; });
+    const matched = projectId || doc.analysis.projectId;
+    if (matched && projectById(matched)) await applyDocumentToProject(doc, matched);
+    else await persistWorkbench();
+  } catch (error) {
+    doc.warnings.push('自动分析未完成，原文件已保存：' + documentFailureReason(error));
+    try { await persistWorkbench(); }
+    catch { doc.warnings.push('分析结果暂未写入数据库，请检查磁盘空间后重试保存。'); }
+  }
+}
+
+async function reparseSavedDocument() {
+  const doc = documentById(state.documentId);
+  if (!doc?.assetId || state.documentReparsing) return;
+  if (!window.xiaoyuDesktop?.reparseDocument) { showToast('请使用更新后的桌面版重新解析'); return; }
+  state.documentReparsing = true;
+  const button = document.querySelector('[data-action="document-reparse"]');
+  if (button) { button.disabled = true; button.textContent = '正在解析原文件…'; }
+  doc.instructions = fieldValue('document-edit-instructions').slice(0, 4000);
+  doc.analysisEngine = fieldValue('document-engine') || 'local';
+  try {
+    const result = await window.xiaoyuDesktop.reparseDocument({ assetId: doc.assetId });
+    if (!result.parseError) {
+      const total = DB.documents.reduce((sum, other) => sum + (other.id === doc.id ? 0 : other.content.length), 0);
+      if (total + result.text.length > 10000000) throw new Error('正文总量已达上限，请先导出整理附件记录');
+      doc.content = result.text;
+      doc.warnings = result.warnings;
+      doc.parseError = '';
+      if (!doc.analysis?.tasks?.length) await finishDocumentAnalysis(doc, doc.requestedProjectId || doc.projectId);
+    } else doc.parseError = result.parseError;
+    await persistWorkbench();
+    if (document.querySelector('[data-action="document-reparse"]') === button) openDocumentEditor(doc.id);
+    showToast(doc.parseError ? '原文件仍已保留，解析失败：' + doc.parseError : '原文件已重新解析');
+  } finally {
+    state.documentReparsing = false;
+    if (button?.isConnected) { button.disabled = false; button.textContent = '重新解析原文件'; }
   }
 }
 
@@ -167,7 +211,7 @@ function openDocumentLibrary(errors = []) {
     `${errors.length ? `<div class="integration-notice">${errors.map(error => `<p>${esc(error)}</p>`).join('')}</div>` : ''}
     <div class="feature-list">${DB.documents.slice().reverse().map(doc => `<div class="feature-list-row">
       <div class="document-list-label"><b>${esc(doc.title)}</b><p class="small muted">${esc(projectById(doc.projectId)?.name || '待确认项目')}
-      · ${esc(doc.analysis?.mode || '待分析')} · ${doc.analysis?.tasks?.length || 0} 条拆解</p></div>
+      · ${esc(doc.parseError ? '原文件已保存 · 解析待重试' : doc.analysis?.mode || '待分析')} · ${doc.analysis?.tasks?.length || 0} 条拆解</p></div>
       <button class="btn btn-sm" data-action="document-open" data-id="${esc(doc.id)}">查看与修改</button></div>`).join('') || '暂无附件'}</div>`,
     `<button class="btn btn-primary" data-action="chat-attachment">${icon('upload', 13)} 上传附件</button>`, 'document-library');
 }
@@ -192,7 +236,8 @@ function openDocumentEditor(id, keepDraft = false) {
     });
   }
   const draft = state.documentDraft;
-  const warnings = [...new Set([...(doc.warnings || []), ...(draft.warnings || [])])];
+  const warnings = [...new Set([...(doc.parseError ? ['原文件已保存，正文解析失败：' + doc.parseError] : []),
+    ...(doc.warnings || []), ...(draft.warnings || [])])];
   localModal(doc.title, `<div class="document-analysis-status"><span class="chip">${esc(draft.mode)}</span>
     <span class="small muted">${esc(projectById(doc.projectId)?.name || '待确认项目')} · ${doc.content.length} 字</span></div>
     ${warnings.length ? `<div class="integration-notice">${warnings.map(text => `<p>${esc(text)}</p>`).join('')}</div>` : ''}
@@ -219,6 +264,7 @@ function openDocumentEditor(id, keepDraft = false) {
     <details class="document-source"><summary>原文与来源</summary><pre class="document-content">${esc(doc.content)}</pre></details>`,
     `<button class="btn btn-sm" data-action="document-library">${icon('arrowLeft', 12)} 附件记录</button>
     ${doc.assetId ? '<button class="btn btn-sm" data-action="document-original">导出原文件</button>' : ''}
+    ${doc.parseError && doc.assetId ? '<button class="btn btn-sm" data-action="document-reparse">重新解析原文件</button>' : ''}
     <button class="btn btn-sm" data-action="document-export">导出文本</button>
     <button class="btn btn-sm" data-action="document-reanalyze">${icon('sparkles', 12)} 重新分析</button>
     <button class="btn btn-sm" data-action="document-save">保存修改</button>

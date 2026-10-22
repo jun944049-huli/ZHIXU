@@ -2,8 +2,9 @@
 
 function ensureChat() {
   if (!state.chatMessages) {
-    state.chatMessages = [{ role: 'assistant', time: '现在', model: '本地指令',
-      text: '告诉我要安排的任务、项目进度或风险。写入前会提供待确认的草稿。' }];
+    state.chatMessages = [{ role: 'assistant', time: '现在', model: '系统',
+      text: hasAIProvider() ? '可以向我提问、分析项目或下达工作指令。修改工作数据前会提供待确认的草稿。' :
+        '可以使用本地任务指令；在个人设置中连接模型后，即可进行模型问答和指令分析。' }];
   }
 }
 
@@ -77,7 +78,7 @@ function renderChatActionCard(card) {
       ${status === 'pending' ? `
         <div class="action-foot">
           <button class="btn btn-primary btn-sm" data-action="chat-apply" data-id="${card.id}">${icon('check', 12)} 确认执行</button>
-          ${card.type === 'progress' ? `<button class="btn btn-sm" data-action="chat-apply" data-id="${card.id}" data-mode="progress">只更新进度</button>` : ''}
+          ${card.type === 'progress' && !card.modelAction ? `<button class="btn btn-sm" data-action="chat-apply" data-id="${card.id}" data-mode="progress">只更新进度</button>` : ''}
           <button class="btn btn-sm btn-ghost" data-action="chat-cancel" data-id="${card.id}">取消</button>
         </div>
       ` : ''}
@@ -116,7 +117,7 @@ function renderChatMessage(m) {
   const avatar = isUser
     ? `<span class="chat-avatar user" style="background:${DB.user.color}">${esc(DB.user.initials)}</span>`
     : `<span class="chat-avatar ai">${icon('sparkles', 14)}</span>`;
-  const meta = isUser ? `你 · ${m.time}` : `${esc(assistantName())} · ${m.model || state.chatModel} · ${m.time}`;
+  const meta = isUser ? `你 · ${esc(m.time)}` : `${esc(assistantName())} · ${esc(m.model || state.chatModel)} · ${esc(m.time)}`;
   const text = isUser
     ? String(m.text || '')
     : String(m.text || '').replace(/^早上好，[^。]+。/, `早上好，${DB.user.name}。`);
@@ -136,6 +137,7 @@ function renderChatMessage(m) {
           </div>
         ` : ''}
         ${m.actionCard ? renderChatActionCard(m.actionCard) : ''}
+        ${m.retryOf ? `<button class="btn btn-sm mt-8" data-action="chat-retry" data-id="${esc(m.retryOf)}">${icon('refresh', 12)} 重试模型请求</button>` : ''}
         ${m.quick ? renderChatQuick(m.quick) : ''}
         <div class="chat-meta">${meta}</div>
       </div>
@@ -149,7 +151,7 @@ function renderChatLoading() {
       <span class="chat-avatar ai">${icon('sparkles', 14)}</span>
       <div class="chat-msg-body">
         <div class="chat-bubble chat-loading"><i></i><i></i><i></i></div>
-        <div class="chat-meta">正在用 ${esc(state.chatModel)} 匹配项目、任务与工作流…</div>
+        <div class="chat-meta">正在使用 ${esc(state.chatRequestModel || chatModelLabel())}…</div>
       </div>
     </div>
   `;
@@ -181,7 +183,7 @@ function renderChat() {
           ${renderChatShortcuts()}
 
           <div class="composer-box">
-            <textarea id="chat-input" rows="2" placeholder="直接说：把星火项目进展更新到 80%，测试库风险升到高……"></textarea>
+            <textarea id="chat-input" rows="2" maxlength="20000" placeholder="提问、分析资料，或告诉我需要安排和修改的工作……">${esc(state.chatDraft || '')}</textarea>
             <div class="composer-bar">
               <button class="icon-btn sm" data-action="chat-attachment" title="上传附件" aria-label="上传附件">${icon('plus', 14)}</button>
               <button class="icon-btn sm" data-action="document-library" title="附件记录与待确认项目" aria-label="附件记录与待确认项目">${icon('file', 14)}</button>
@@ -190,8 +192,8 @@ function renderChat() {
               </select>
               <button class="composer-tool" data-action="open-polish" title="润色输入内容">${icon('sparkles', 13)} 润色</button>
               <span class="composer-spacer"></span>
-              <span class="small muted">本地指令</span>
-              <button class="send-btn" data-action="chat-send" aria-label="发送">${icon('arrowUp', 16)}</button>
+              <span class="small muted chat-active-model" title="${esc(chatModelLabel())}">${esc(chatModelLabel())}</span>
+              <button class="send-btn" data-action="chat-send" aria-label="发送" ${state.chatSending ? 'disabled' : ''}>${icon('arrowUp', 16)}</button>
             </div>
           </div>
           <div class="composer-hint">Enter 发送 · Shift+Enter 换行 · 写操作会先给你确认</div>
@@ -200,7 +202,7 @@ function renderChat() {
 
       <aside class="chat-rail">
         <div class="card">
-          <div class="panel-head"><h3>${icon('layers', 14)} AI 正在参考</h3><span class="chip green">本地</span></div>
+          <div class="panel-head"><h3>${icon('layers', 14)} 工作上下文</h3><span class="chip ${hasAIProvider() ? 'green' : ''}">${hasAIProvider() ? '模型已配置' : '本地'}</span></div>
           <div class="panel-body">
             <div class="chat-context-list">
               <div><span>项目字典</span><b>${DB.projects.length} 个</b></div>
@@ -228,8 +230,8 @@ function renderChat() {
         <div class="card chat-safety">
           <div class="panel-body">
             <div class="eyebrow">安全边界</div>
-            <p>本地指令生成草稿，确认后才写入。润色使用个人设置中的供应商。</p>
-            <div class="tiny muted mt-8">完整模型对话尚未接入。</div>
+            <p>${hasAIProvider() ? '当前问题、近期对话及相关工作摘要会发送到所选供应商；密钥不会加入对话正文。' : '尚未配置模型，当前使用本地任务规则。'}</p>
+            <div class="tiny muted mt-8">模型提出的项目与任务修改，确认后才写入。</div>
           </div>
         </div>
       </aside>
@@ -439,33 +441,128 @@ function buildChatReply(text) {
   };
 }
 
-function sendChat() {
+function chatModelLabel() {
+  const provider = aiProviderConfig();
+  return provider.id === 'local' ? '本地规则' : provider.name + ' · ' + provider.model;
+}
+
+function modelChatContext() {
+  const selected = state.chatContext !== 'auto' ? projectById(state.chatContext)?.id || null : null;
+  const relevant = item => !selected || item.project === selected || item.projectId === selected;
+  const taskDates = new Map(allWorkbenchTasks().map(task => [task.id, DB.meta.today]));
+  for (const [date, tasks] of Object.entries(DB.taskCalendar || {})) {
+    tasks.forEach(task => taskDates.set(task.id, date));
+  }
+  const tasks = allWorkbenchTasks().filter(relevant).slice(-150).map(task => ({
+    id: task.id, title: task.title, projectId: task.project || null, done: !!task.done,
+    due: task.due, date: taskDates.get(task.id), assignee: task.assignee || '', estimate: task.estimate, priority: task.priority
+  }));
+  const projects = DB.projects.filter(project => !selected || project.id === selected).slice(0, 100)
+    .map(project => ({ id: project.id, name: project.name, progress: project.progress,
+      goal: String(project.goal || '').slice(0, 500), owner: project.owner,
+      risks: (DB.projectDetails[project.id]?.risks || []).filter(risk => risk.status !== 'closed')
+        .slice(0, 10).map(risk => ({ title: risk.title, level: risk.level })) }));
+  const documents = DB.documents.filter(doc => !doc.parseError && relevant(doc)).slice(-4).map(doc => ({
+    title: doc.title, projectId: doc.projectId, summary: doc.analysis?.summary || '',
+    excerpt: doc.content.slice(0, 8000), excerptOnly: doc.content.length > 8000
+  }));
+  const data = { projects, tasks, documents, capacity: DB.capacity,
+    workflow: String(DB.workflow.text || '').slice(0, 2000),
+    notes: selected ? projectNotesFor(selected).slice(0, 3).map(note => String(note.text).slice(0, 1000)) : [],
+    scope: selected || '全部项目的有限摘要；未提供的数据不能推测' };
+  let encoded = JSON.stringify(data);
+  while (encoded.length > 100000 && data.documents.length) { data.documents.shift(); encoded = JSON.stringify(data); }
+  while (encoded.length > 100000 && data.tasks.length) { data.tasks.shift(); encoded = JSON.stringify(data); }
+  while (encoded.length > 100000 && data.projects.length) { data.projects.pop(); encoded = JSON.stringify(data); }
+  return { today: DB.meta.today, selectedProjectId: selected,
+    projects: DB.projects.slice(0, 500).map(project => ({ id: project.id, name: project.name })), data: encoded };
+}
+
+function modelChatCard(action, raw) {
+  const project = action.projectId ? projectById(action.projectId) : null;
+  if (action.projectId && !project) return null;
+  const card = { ...action, id: newRecordId('action'), status: 'pending', raw, modelAction: true, items: [] };
+  if (action.type === 'task') Object.assign(card, {
+    title: '准备新建任务', taskTitle: action.title, date: action.date || action.due || DB.meta.today,
+    estimate: action.estimateHours ? `${action.estimateHours}h` : '待估时',
+    items: [{ label: '任务', value: action.title }, { label: '项目', value: project?.name || '未归属' },
+      { label: '负责人', value: action.assignee || '待确认' }, { label: '截止日期', value: action.due || '待确认' },
+      { label: '工时', value: action.estimateHours ? `${action.estimateHours}h` : '待估时' },
+      { label: '安排日期', value: action.date || action.due || DB.meta.today }, { label: '优先级', value: action.priority }]
+  });
+  if (action.type === 'progress') Object.assign(card, { title: '准备更新项目进度',
+    items: [{ label: '项目', value: project.name }, { label: '进度', value: `${project.progress}% → ${action.progress}%` }] });
+  if (action.type === 'risk') Object.assign(card, { title: '准备更新风险', riskTitle: action.title, riskLevel: action.level,
+    items: [{ label: '项目', value: project.name }, { label: '风险', value: action.title }, { label: '等级', value: action.level }] });
+  if (action.type === 'capture') Object.assign(card, { title: '准备保存到收件箱', captureTitle: action.title,
+    items: [{ label: '内容', value: action.title }, { label: '项目', value: project?.name || '未归属' }] });
+  if (action.type === 'project') Object.assign(card, { title: '准备创建新项目',
+    items: [{ label: '名称', value: action.name }, { label: '目标', value: action.goal || '待补充' },
+      { label: '负责人', value: action.owner || DB.user.name }] });
+  return card;
+}
+
+async function sendChat(retryId = '') {
+  if (state.chatSending) return;
   ensureChat();
   const ta = document.getElementById('chat-input');
-  if (!ta) return;
-  const text = ta.value.trim();
+  const previous = retryId ? state.chatMessages.find(message => message.id === retryId && message.role === 'user') : null;
+  if (!ta && !previous) return;
+  const text = previous ? previous.text : ta.value.trim();
   if (!text) {
     showToast('先输入一句指令');
     return;
   }
 
-  state.chatMessages.push({ role: 'user', time: '现在', text });
+  if (text.length > 20000) { showToast('单次消息不能超过 2 万字'); return; }
+  const user = previous || { id: newRecordId('message'), role: 'user', time: '现在', text };
+  if (!previous) { state.chatMessages.push(user); state.chatDraft = ''; }
+  else state.chatMessages = state.chatMessages.filter(message => message.retryOf !== retryId);
   saveChatHistory();
-  state.chatModel = '本地指令';
+  const provider = aiProviderConfig();
+  state.chatModel = chatModelLabel();
+  state.chatRequestModel = state.chatModel;
   state.chatSending = true;
   const requestId = ++state.chatRequestId;
   render();
   scrollChatToBottom();
 
-  setTimeout(() => {
+  try {
+    let replies;
+    if (provider.id === 'local') replies = [buildChatReply(text)];
+    else {
+      if (!window.xiaoyuDesktop?.chat) throw new Error('当前预览未接入模型对话，请使用更新后的桌面版');
+      const history = state.chatMessages.slice(0, state.chatMessages.indexOf(user) + 1)
+        .filter(message => ['user', 'assistant'].includes(message.role) && !message.retryOf)
+        .slice(-24).map(message => ({ role: message.role, content: String(message.text).slice(0, 20000) }));
+      const result = await window.xiaoyuDesktop.chat({
+        provider: { baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: provider.model,
+          protocol: provider.protocol || 'auto', name: provider.name },
+        messages: history, context: modelChatContext()
+      });
+      const cards = result.actions.map(action => modelChatCard(action, text)).filter(Boolean);
+      const reply = { role: 'assistant', time: '现在', model: result.model,
+        text: result.reply + (result.warnings.length ? '\n\n' + result.warnings.join('\n') : '') };
+      if (cards.length) reply.actionCard = cards[0];
+      replies = [reply, ...cards.slice(1).map(actionCard => ({
+        role: 'assistant', time: '现在', model: result.model, text: '另有一项待确认操作。', actionCard
+      }))];
+    }
     if (state.chatRequestId !== requestId) return;
-    const reply = buildChatReply(text);
-    state.chatMessages.push(reply);
+    state.chatMessages.push(...replies);
+  } catch (error) {
+    if (state.chatRequestId !== requestId) return;
+    state.chatMessages.push({ role: 'assistant', time: '现在', model: provider.model || '本地规则',
+      text: '模型请求失败：' + documentFailureReason(error) + '\n原消息已保留，尚未执行操作，可以重试。',
+      retryOf: user.id });
+  } finally {
+    if (state.chatRequestId !== requestId) return;
     saveChatHistory();
     state.chatSending = false;
+    state.chatRequestModel = '';
     render();
     scrollChatToBottom();
-  }, 720);
+  }
 }
 
 async function applyChatAction(mode, cardId) {
@@ -499,19 +596,39 @@ async function applyChatAction(mode, cardId) {
       project: card.projectId || null,
       estimate: card.estimate || '1.5h',
       due: card.due || '待确认',
-      priority: 'P1',
+      priority: card.priority || 'P1', assignee: card.assignee || '',
       ai: true, sourceId, done: false, createdAt: new Date().toISOString()
     };
-    addConfirmedTask(newTask, card.date || DB.meta.today, 'must');
+    const bucket = card.modelAction ? newTask.estimate === '待估时' || newTask.priority === 'P4' ? 'could' :
+      ['P0', 'P1'].includes(newTask.priority) ? 'must' : 'should' : 'must';
+    addConfirmedTask(newTask, card.date || DB.meta.today, bucket);
     summary = `已安排到 ${card.date || DB.meta.today}：${newTask.title}`;
   } else if (card.type === 'risk') {
     if (p) {
-      raiseProjectRisk(p, card.raw);
+      if (card.modelAction) {
+        DB.projectDetails[p.id] ||= detailForProject(p);
+        const risks = DB.projectDetails[p.id].risks;
+        let risk = risks.find(item => item.title === card.riskTitle && item.status !== 'closed');
+        const score = { '低': [2, 2], '中': [3, 3], '高': [4, 4] }[card.riskLevel];
+        if (!score) { showToast('风险等级无效，请重新分析'); return; }
+        if (!risk) { risk = { id: newRecordId('risk'), title: card.riskTitle,
+          owner: DB.user.name, action: '待补充应对措施', status: 'open' }; risks.push(risk); }
+        Object.assign(risk, { level: card.riskLevel, p: score[0], i: score[1], score: score[0] * score[1] });
+        p.risks = risks.filter(item => item.status !== 'closed').length;
+      } else raiseProjectRisk(p, card.raw);
     }
-    summary = `已把「${p ? p.name : '项目'}」的首条未关闭风险提升为高，请在风险登记册补充应对动作。`;
+    summary = card.modelAction ? `已更新「${p.name}」风险：${card.riskTitle} · ${card.riskLevel}` :
+      `已把「${p ? p.name : '项目'}」的首条未关闭风险提升为高，请在风险登记册补充应对动作。`;
+  } else if (card.type === 'project' && card.modelAction) {
+    if (DB.projects.some(project => project.name === card.name)) { showToast('已有同名项目，请取消草稿并指定项目'); return; }
+    DB.projects.push({ id: newRecordId('project'), name: card.name, goal: card.goal, owner: card.owner || DB.user.name,
+      code: 'PRJ', color: DB.user.color, progress: 0, health: 'green', planned: 0, open: 0, risks: 0,
+      next: '未安排', nextDate: '—', updated: '刚刚', members: [{ i: DB.user.initials, c: DB.user.color }],
+      createdAt: new Date().toISOString() });
+    summary = '已创建项目：' + card.name;
   } else {
     DB.inbox.unshift({
-      id: newRecordId('inbox'), title: card.raw || '来自对话的消息',
+      id: newRecordId('inbox'), title: card.captureTitle || card.raw || '来自对话的消息',
       raw: card.raw || '', source: '对话', sourceType: 'self', person: DB.user.name,
       time: '刚刚', project: p?.id || null, confidence: 0, alternatives: [],
       due: '待确认', p50: '1h', p90: '2h', basis: '待人工确认', type: '待分类',
@@ -798,6 +915,7 @@ function applyPolish() {
   syncPolishOriginal();
   const polished = String(state.polishResult || polishText(state.polishText, state.polishTone)).trim();
   const ta = document.getElementById('chat-input');
+  state.chatDraft = polished;
   if (ta) ta.value = polished;
   closeModal();
   if (ta) {
@@ -917,6 +1035,7 @@ function saveChatShortcuts() {
 }
 
 function fillChatInput(text) {
+  state.chatDraft = text;
   const ta = document.getElementById('chat-input');
   if (!ta) return;
   ta.value = text;

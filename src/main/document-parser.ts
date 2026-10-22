@@ -1,7 +1,7 @@
 import { OfficeParser, type OfficeContentNode } from 'officeparser';
 import { createRequire } from 'node:module';
 import { extname } from 'node:path';
-import { documentInputSchema } from '../shared/contracts';
+import { documentInputSchema, MAX_DOCUMENT_TEXT } from '../shared/contracts';
 
 const documentRequire = createRequire(import.meta.url);
 
@@ -45,10 +45,10 @@ export async function parseDocument(value: unknown): Promise<{ text: string; war
       const ast = await OfficeParser.parseOffice(Buffer.from(bytes), {
         fileType: extension as 'docx' | 'xlsx' | 'pptx' | 'pdf',
         extractAttachments: false, ocr: false, ignoreSlideMasters: true,
-        abortSignal: AbortSignal.timeout(60000),
-        pdfParserConfig: { separateProcess: false, extractTextColor: false, maxTimeMs: 50000 },
-        decompressionLimits: { maxZipEntries: 5000, maxUncompressedBytes: 80 * 1024 * 1024,
-          maxTableCells: 100000, maxXmlElements: 300000 },
+        abortSignal: AbortSignal.timeout(165000),
+        pdfParserConfig: { separateProcess: false, extractTextColor: false, maxTimeMs: 150000 },
+        decompressionLimits: { maxZipEntries: 10000, maxUncompressedBytes: 256 * 1024 * 1024,
+          maxTableCells: 300000, maxXmlElements: 1000000 },
         onWarning: () => {}
       });
       // Label source locations so the analysis and task excerpts remain traceable.
@@ -79,6 +79,6 @@ export async function parseDocument(value: unknown): Promise<{ text: string; war
   if (!text || !text.replace(/\[(?:第 \d+ 页|幻灯片 \d+|工作表 \d+)\]/g, '').trim()) {
     throw new Error('没有提取到可分析正文；扫描件或图片需要先 OCR');
   }
-  if (text.length > 120000) throw new Error('单份文档正文超过 12 万字，请拆分文件后上传');
+  if (text.length > MAX_DOCUMENT_TEXT) throw new Error('原文件可保存，但全文超过 100 万字解析上限；请拆分章节后进行全文分析');
   return { text, warnings };
 }

@@ -4,7 +4,7 @@ import pptxgen from 'pptxgenjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export function smallPDF(lines: string[]) {
+export function smallPDF(lines: string[], paddingBytes = 0) {
   const body = lines.map((line, index) => `${index ? '0 -24 Td\n' : ''}(${line.replace(/[\\()]/g, '\\$&')}) Tj`).join('\n');
   const stream = `BT /F1 12 Tf 50 760 Td\n${body}\nET`;
   const objects = [
@@ -14,12 +14,13 @@ export function smallPDF(lines: string[]) {
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
     `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`
   ];
+  if (paddingBytes) objects.push(`<< /Length ${paddingBytes} >>\nstream\n${'x'.repeat(paddingBytes)}\nendstream`);
   let pdf = '%PDF-1.4\n';
   const offsets = [0];
   objects.forEach((object, index) => { offsets.push(Buffer.byteLength(pdf)); pdf += `${index + 1} 0 obj\n${object}\nendobj\n`; });
   const start = Buffer.byteLength(pdf);
-  pdf += `xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}`;
-  pdf += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${start}\n%%EOF`;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF`;
   return Buffer.from(pdf);
 }
 
@@ -50,4 +51,8 @@ if (process.argv.includes('--write')) {
   const path = process.argv[process.argv.indexOf('--write') + 1];
   mkdirSync(path, { recursive: true });
   for (const [name, bytes] of Object.entries(await documentFixtures())) writeFileSync(join(path, name), bytes);
+  if (process.argv.includes('--large')) {
+    writeFileSync(join(path, '大附件49MB.pdf'), smallPDF(['Prepare the large document review'], 49 * 1024 * 1024));
+    writeFileSync(join(path, '超过50MB.pdf'), Buffer.alloc(50 * 1024 * 1024 + 1, 0x61));
+  }
 }

@@ -278,6 +278,9 @@ function handleClick(e) {
     case 'chat-send':
       sendChat();
       break;
+    case 'chat-retry':
+      sendChat(el.dataset.id);
+      break;
     case 'chat-apply':
       applyChatAction(el.dataset.mode || '', el.dataset.id);
       break;
@@ -323,6 +326,7 @@ function handleClick(e) {
 }
 
 function handleInput(e) {
+  if (e.target.id === 'chat-input') state.chatDraft = e.target.value;
   if (e.target.id === 'command-input') {
     filterCommand(e.target.value);
   }
@@ -507,7 +511,7 @@ function loadLocalOverrides() {
     const chatModel = storageGet('jw-chat-model');
     if (chatModel) state.chatModel = chatModel;
     const activeProvider = aiProviderConfig();
-    if (activeProvider.id === 'custom') state.chatModel = activeProvider.name;
+    state.chatModel = activeProvider.id === 'local' ? '本地规则' : activeProvider.name + ' · ' + activeProvider.model;
   } catch (e) { /* ignore */ }
 }
 

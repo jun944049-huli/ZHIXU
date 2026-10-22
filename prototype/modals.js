@@ -321,12 +321,11 @@ async function saveProfile() {
         : ''
     };
     DB.settings.aiProvider = 'custom';
-    state.chatModel = resolvedName;
   } else {
     delete DB.settings.customProvider;
     DB.settings.aiProvider = deepseek ? 'deepseek' : 'local';
-    if (deepseek) state.chatModel = 'DeepSeek';
   }
+  state.chatModel = chatModelLabel();
   try { storageSet('jw-chat-model', state.chatModel); } catch (e) { /* ignore */ }
 
   DB.projects.forEach(p => {

@@ -571,6 +571,7 @@ function handleFeatureAction(action, el) {
     case 'document-task-add': updateDocumentDraft('add'); break;
     case 'document-task-remove': updateDocumentDraft('remove', el.dataset.index); break;
     case 'document-original': void exportDocumentOriginal().catch(error => showToast(error.message || '原文件导出失败')); break;
+    case 'document-reparse': void reparseSavedDocument().catch(error => showToast(error.message || '重新解析失败')); break;
     case 'document-export': {
       const doc = DB.documents.find(d => d.id === state.documentId);
       if (doc) void saveLocalFile({ title: doc.title, format: 'md', text: doc.content }); break;

@@ -149,6 +149,32 @@ try {
     await page.screenshot({ path: resolve(evidence, `browser-provider-${width}.png`) });
   }
   await page.evaluate(() => { delete window.xiaoyuDesktop; });
+  await page.locator('#modal-root [data-action="close-modal"]').first().click();
+  await page.evaluate(() => {
+    DB.settings.aiProvider = 'custom';
+    DB.settings.customProvider = { name: '自定义供应商长名称布局验收',
+      baseUrl: 'http://127.0.0.1', apiKey: 'layout-only', model: 'text-model-with-a-very-long-provider-model-name' };
+    state.chatMessages = [{ role: 'assistant', model: 'text-model-with-a-very-long-provider-model-name',
+      time: '现在', text: '请确认任务安排。', actionCard: modelChatCard({ type: 'task', title: '完成模型任务验收',
+        projectId: 'p1', date: '2026-10-23', due: '2026-10-24', assignee: '小陈',
+        estimateHours: 2, priority: 'P2' }, '安排验收') }];
+    state.view = 'chat';
+    render();
+  });
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await finishAnimations();
+    const dimensions = await page.evaluate(() => ({
+      width: innerWidth, scrollWidth: document.documentElement.scrollWidth,
+      composerWidth: document.querySelector('.composer-bar').clientWidth,
+      composerScroll: document.querySelector('.composer-bar').scrollWidth,
+      cardWidth: document.querySelector('.action-card').clientWidth,
+      cardScroll: document.querySelector('.action-card').scrollWidth
+    }));
+    assert.ok(dimensions.scrollWidth <= width + 1 && dimensions.composerScroll <= dimensions.composerWidth + 1 &&
+      dimensions.cardScroll <= dimensions.cardWidth + 1, 'model chat: ' + JSON.stringify(dimensions));
+    await page.screenshot({ path: resolve(evidence, `browser-model-chat-${width}.png`), fullPage: true });
+  }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: true, projectId, overflow }));
 } finally {

@@ -10,7 +10,7 @@ mkdirSync(evidence, { recursive: true });
 const profile = mkdtempSync(join(evidence, 'document-profile-'));
 const files = mkdtempSync(join(evidence, 'document-fixtures-'));
 const exports = mkdtempSync(join(evidence, 'document-exports-'));
-execFileSync(process.execPath, ['--import', 'tsx', 'tests/document-fixtures.ts', '--write', files], { cwd: root });
+execFileSync(process.execPath, ['--import', 'tsx', 'tests/document-fixtures.ts', '--write', files, '--large'], { cwd: root });
 const { ELECTRON_RUN_AS_NODE, ...environment } = process.env;
 const errors = [];
 let application, page;
@@ -36,7 +36,7 @@ async function upload(names, project = '', instructions = '提取交付物；不
   await page.locator('#import-project').selectOption(project);
   await page.locator('#document-instructions').fill(instructions);
   await page.locator('[data-action="document-import"]').click();
-  await page.waitForFunction(() => !state.documentImportBusy, null, { timeout: 150000 });
+  await page.waitForFunction(() => !state.documentImportBusy, null, { timeout: 210000 });
 }
 
 try {
@@ -44,7 +44,7 @@ try {
   const initialTasks = await page.evaluate(() => allWorkbenchTasks().length);
   const initialProjects = await page.evaluate(() => DB.projects.length);
   await upload(['附件需求.docx', '附件清单.xlsx', '附件演示.pptx', '附件任务.pdf']);
-  assert.equal(await page.evaluate(() => DB.documents.length), 4);
+  assert.equal(await page.evaluate(() => DB.documents.filter(doc => !doc.parseError).length), 4);
   assert.equal(await page.evaluate(() => DB.documents.filter(doc => doc.projectId === 'p1').length), 3);
   assert.equal(await page.evaluate(() => allWorkbenchTasks().length), initialTasks + 6);
   assert.equal(await page.evaluate(() => DB.projects.length), initialProjects);
@@ -78,7 +78,16 @@ try {
   await page.waitForFunction(() => !state.documentImportBusy);
   assert.equal(await page.locator('#text-file').evaluate(input => input.files.length), 1);
   assert.match(await page.locator('#document-import-results').innerText(), /扩展名与文件内容不匹配/);
-  assert.equal(await page.evaluate(() => DB.documents.length), 4);
+  assert.equal(await page.evaluate(() => DB.documents.filter(doc => !doc.parseError).length), 4);
+  const failedId = await page.evaluate(() => DB.documents.find(doc => doc.title === '坏文件.pdf').id);
+  assert.equal(await page.evaluate(() => DB.documents.filter(doc => doc.parseError).length), 1);
+  await page.locator(`[data-action="document-open"][data-id="${failedId}"]`).click();
+  await page.locator('[data-action="document-original"]').click();
+  await page.waitForFunction(() => document.querySelector('#toast-root').textContent.includes('原文件已导出'));
+  assert.deepEqual(readFileSync(join(exports, '坏文件.pdf')), readFileSync(join(files, '坏文件.pdf')));
+  await page.locator('[data-action="document-reparse"]').click();
+  await page.waitForFunction(() => !state.documentReparsing);
+  assert.match(await page.locator('.document-editor').innerText(), /正文解析失败/);
   await close();
   await upload(['坏文件.pdf', '附件需求.docx']);
   assert.equal(await page.locator('#text-file').evaluate(input => input.files.length), 2);
@@ -87,7 +96,7 @@ try {
   const tasksBeforeRetry = await page.evaluate(() => allWorkbenchTasks().length);
   await page.locator('[data-action="document-import"]').click();
   await page.waitForFunction(() => !state.documentImportBusy);
-  assert.equal(await page.evaluate(() => DB.documents.length), 4);
+  assert.equal(await page.evaluate(() => DB.documents.filter(doc => !doc.parseError).length), 4);
   assert.equal(await page.evaluate(() => allWorkbenchTasks().length), tasksBeforeRetry);
   await page.locator('#text-file').setInputFiles([]);
   assert.equal(await page.locator('.document-import-result').count(), 0);
@@ -125,12 +134,12 @@ try {
   assert.equal(await page.evaluate(() => allWorkbenchTasks().length), initialTasks + 8);
   await close();
   await upload(['新项目资料.md']);
-  assert.equal(await page.evaluate(() => DB.documents.length), 5);
+  assert.equal(await page.evaluate(() => DB.documents.filter(doc => !doc.parseError).length), 5);
   assert.equal(await page.evaluate(() => allWorkbenchTasks().length), initialTasks + 8);
   await close();
   await application.close();
   await launch();
-  assert.equal(await page.evaluate(() => DB.documents.length), 5);
+  assert.equal(await page.evaluate(() => DB.documents.filter(doc => !doc.parseError).length), 5);
   assert.equal(await page.evaluate(() => allWorkbenchTasks().length), initialTasks + 8);
   assert.equal(await page.evaluate(() => DB.projects.length), initialProjects + 1);
   await page.locator('.nav [data-view="chat"]').click();
@@ -154,14 +163,30 @@ try {
   await page.waitForFunction(() => !state.documentImportBusy);
   assert.match(await page.locator('#document-import-results').innerText(), /本地记录保存失败.*模拟临时磁盘写入失败/);
   assert.equal(await page.locator('#text-file').evaluate(input => input.files[0].name), '临时保存故障.md');
-  assert.equal(await page.evaluate(() => DB.documents.length), 5);
+  assert.equal(await page.evaluate(() => DB.documents.filter(doc => !doc.parseError).length), 5);
   await page.locator('[data-action="document-import"]').click();
   await page.waitForFunction(() => !state.documentImportBusy);
   await page.locator('.document-editor').waitFor();
-  assert.equal(await page.evaluate(() => DB.documents.length), 6);
+  assert.equal(await page.evaluate(() => DB.documents.filter(doc => !doc.parseError).length), 6);
+  await close();
+  await upload(['大附件49MB.pdf']);
+  assert.match(await page.locator('.document-content').textContent(), /Prepare the large document review/);
+  await page.locator('[data-action="document-original"]').click();
+  await page.waitForFunction(() => document.querySelector('#toast-root').textContent.includes('原文件已导出'));
+  assert.deepEqual(readFileSync(join(exports, '大附件49MB.pdf')), readFileSync(join(files, '大附件49MB.pdf')));
+  await close();
+  await page.locator('[data-action="chat-attachment"]').click();
+  await page.locator('#text-file').setInputFiles(join(files, '超过50MB.pdf'));
+  await page.locator('[data-action="document-import"]').click();
+  await page.waitForFunction(() => !state.documentImportBusy);
+  assert.match(await page.locator('#document-import-results').innerText(), /超过 50 MB/);
+  assert.equal(await page.locator('#text-file').evaluate(input => input.files.length), 1);
+  assert.equal(await page.evaluate(() => DB.documents.length), 8);
   assert.deepEqual(errors, []);
   const result = { passed: true, formats: ['DOCX', 'XLSX', 'PDF', 'PPTX', 'Markdown'],
-    documents: 6, newProjectsAfterConfirmation: 1, createdTasks: 8,
+    documents: 8, parsedDocuments: 7, largePDFBytes: readFileSync(join(files, '大附件49MB.pdf')).length,
+    sourcePreservedOnParseFailure: true, reparseAvailable: true, over50MBRejectedAndSelectionRetained: true,
+    newProjectsAfterConfirmation: 1, createdTasks: 8,
     failedSelectionRetained: true, partialBatchIdempotent: true, transientFailureRetried: true,
     exported: readdirSync(exports), profile };
   writeFileSync(join(evidence, 'document-audit.json'), JSON.stringify(result, null, 2));

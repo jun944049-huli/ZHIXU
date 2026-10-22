@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { WorkbenchStore } from './database';
 import { polish } from './polish';
+import { chat } from './chat';
 import { providerDiagnose, providerModels } from './providers';
 import { runIntegration } from './integrations';
 import { exportBuffer, exportSchema, reportHTML } from './exports';
@@ -87,6 +88,10 @@ else {
       checkSender(event);
       return polish(payload);
     });
+    ipcMain.handle('workbench:chat', (event, payload: unknown) => {
+      checkSender(event);
+      return chat(payload);
+    });
     ipcMain.handle('workbench:provider-models', (event, payload: unknown) => {
       checkSender(event);
       return providerModels(payload);
@@ -107,6 +112,13 @@ else {
     ipcMain.handle('workbench:document-analyze', (event, payload: unknown) => {
       checkSender(event);
       return analyzeDocument(payload);
+    });
+    ipcMain.handle('workbench:document-reparse', async (event, payload: unknown) => {
+      checkSender(event);
+      if (documentImportBusy) throw new Error('正在处理另一份附件，请稍候');
+      documentImportBusy = true;
+      try { return await documents.reparse(payload); }
+      finally { documentImportBusy = false; }
     });
     ipcMain.handle('workbench:document-original', async (event, input: unknown) => {
       checkSender(event);

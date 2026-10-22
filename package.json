@@ -1,6 +1,6 @@
 {
   "name": "xiaoyu-workbench",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "Xiaoyu personal workbench",
   "main": "./out/main/index.js",
@@ -20,6 +20,7 @@
     "test:interfaces": "node tests/interfaces.smoke.mjs",
     "test:documents": "node tests/documents.smoke.mjs",
     "test:providers": "node tests/providers.smoke.mjs",
+    "test:chat": "node tests/chat.smoke.mjs",
     "pack": "npm run build && electron-builder --win dir",
     "dist": "npm run build && electron-builder --win portable",
     "postinstall": "electron-builder install-app-deps"

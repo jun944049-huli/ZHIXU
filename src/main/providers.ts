@@ -209,7 +209,7 @@ export async function providerDiagnose(value: unknown): Promise<ProviderDiagnosi
       endpoint: result.endpoint, httpStatus: result.httpStatus, durationMs: Date.now() - started });
     report.suggestion = report.checks.some(check => check.status === 'warn') ?
       '真实请求通过；模型列表不可用时可手动选用已测试模型。保存后使用当前配置。' :
-      '模型获取和真实文本请求均通过。保存后用于润色及附件分析。';
+      '模型获取和真实文本请求均通过。保存后用于问答、指令理解、润色及附件分析。';
   } catch (error) { failure('真实请求', error, started); }
   return report;
 }

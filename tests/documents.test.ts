@@ -9,6 +9,7 @@ import { parseDocument } from '../src/main/document-parser';
 import { DocumentFiles } from '../src/main/document-files';
 import { analyzeDocument } from '../src/main/document-analysis';
 import { documentFixtures } from './document-fixtures';
+import { documentInputSchema, MAX_DOCUMENT_BYTES } from '../src/shared/contracts';
 
 const inputs = () => ({ text: '星火项目\n完成附件核对', name: '需求.docx', today: '2026-10-22',
   instructions: '提取待办，不猜测', projects: [{ id: 'p1', name: '星火项目' }] });
@@ -38,8 +39,38 @@ test('invalid, oversized and empty files fail without a fake analysis', async ()
     { name: '旧文件.ppt', bytes: Buffer.from('unsupported') },
     { name: '空白.txt', bytes: Buffer.from(' ') },
     { name: '二进制.txt', bytes: Buffer.from([0xff, 0x00, 0xfe]) },
-    { name: '过大.txt', bytes: Buffer.alloc(20 * 1024 * 1024 + 1) }
+    { name: '过大.txt', bytes: Buffer.alloc(MAX_DOCUMENT_BYTES + 1) }
   ]) await assert.rejects(parseDocument(input));
+});
+
+test('50 MB sources are accepted and failed extraction preserves an exact recoverable original', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'xiaoyu-large-files-'));
+  try {
+    const files = new DocumentFiles(join(directory, 'attachments'));
+    const bytes = Buffer.alloc(MAX_DOCUMENT_BYTES, 0x61);
+    assert.equal(documentInputSchema.safeParse({ name: '大文件.pdf', bytes }).success, true);
+    assert.equal(documentInputSchema.safeParse({ name: '过大.pdf', bytes: Buffer.alloc(MAX_DOCUMENT_BYTES + 1) }).success, false);
+    const result = await files.import({ name: '大文件.pdf', bytes }, async () => { throw new Error('模拟解析器内存不足'); });
+    assert.match(result.parseError!, /解析器内存不足/);
+    assert.equal(result.text, '');
+    const exported = join(directory, '导出.pdf');
+    await files.export(result.assetId, exported);
+    assert.deepEqual(readFileSync(exported), bytes);
+    const reopened = new DocumentFiles(join(directory, 'attachments'));
+    const retried = await reopened.reparse({ assetId: result.assetId }, async () => ({ text: '恢复的正文', warnings: [] }));
+    assert.equal(retried.text, '恢复的正文');
+    assert.equal(retried.assetId, result.assetId);
+    assert.equal(retried.parseError, undefined);
+    await assert.rejects(reopened.reparse({ assetId: '../workbench.sqlite' }), /无效/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('full text above the old 120,000 character cap can be parsed and analyzed', async () => {
+  const parsed = await parseDocument({ name: '长文.md', bytes: Buffer.from('资料说明\n'.repeat(30000) + '完成长文验收') });
+  assert.ok(parsed.text.length > 120000);
+  const result = await analyzeDocument({ ...inputs(), text: parsed.text });
+  assert.equal(result.tasks.length, 1);
+  assert.equal(result.tasks[0].title, '完成长文验收');
 });
 
 test('UTF-16 and common Chinese CSV encoding are readable and wrong extensions are explained', async () => {

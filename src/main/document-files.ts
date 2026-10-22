@@ -2,15 +2,16 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile, readFile, copyFile } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { Worker } from 'node:worker_threads';
-import { documentInputSchema } from '../shared/contracts';
+import { documentInputSchema, type ImportedDocument } from '../shared/contracts';
+import { z } from 'zod';
 
 export async function parseInWorker(payload: unknown) {
   return new Promise<{ text: string; warnings: string[] }>((resolve, reject) => {
     let settled = false;
     const worker = new Worker(join(import.meta.dirname, 'document-worker.js'), {
-      workerData: payload, resourceLimits: { maxOldGenerationSizeMb: 512 }
+      workerData: payload, resourceLimits: { maxOldGenerationSizeMb: 1024 }
     });
-    const timer = setTimeout(() => { settled = true; void worker.terminate(); reject(new Error('解析超过 75 秒，请拆分文件后重试')); }, 75000);
+    const timer = setTimeout(() => { settled = true; void worker.terminate(); reject(new Error('解析超过 180 秒，原文件已保留，可稍后重试解析或拆分文件')); }, 180000);
     const finish = () => { clearTimeout(timer); void worker.terminate(); };
     worker.once('message', message => {
       settled = true;
@@ -36,9 +37,8 @@ export async function parseInWorker(payload: unknown) {
 export class DocumentFiles {
   constructor(private readonly directory: string) {}
 
-  async import(value: unknown, parse = parseInWorker) {
+  async import(value: unknown, parse = parseInWorker): Promise<ImportedDocument> {
     const payload = documentInputSchema.parse(value);
-    const parsed = await parse(payload);
     const bytes = Buffer.from(payload.bytes);
     const assetId = createHash('sha256').update(bytes).digest('hex') + extname(payload.name).toLowerCase();
     this.path(assetId);
@@ -52,7 +52,26 @@ export class DocumentFiles {
         code === 'EACCES' || code === 'EPERM' ? '原文件保存失败：附件目录无写入权限或被安全软件阻止' :
           '原文件保存失败：附件目录不可写，请检查磁盘和目录权限后重试');
     }
-    return { ...parsed, assetId };
+    // Keep the source independently of parser support, memory and text limits.
+    return this.parseSaved(payload, assetId, parse);
+  }
+
+  async reparse(value: unknown, parse = parseInWorker): Promise<ImportedDocument> {
+    const { assetId } = z.object({ assetId: z.string().max(100) }).parse(value);
+    const bytes = await readFile(this.path(assetId));
+    if (createHash('sha256').update(bytes).digest('hex') !== assetId.split('.')[0]) {
+      throw new Error('原附件校验失败，请从原始文件重新上传');
+    }
+    return this.parseSaved(documentInputSchema.parse({ name: assetId, bytes }), assetId, parse);
+  }
+
+  private async parseSaved(payload: z.infer<typeof documentInputSchema>, assetId: string,
+    parse: (payload: unknown) => Promise<{ text: string; warnings: string[] }>): Promise<ImportedDocument> {
+    try { return { ...await parse(payload), assetId }; }
+    catch (error) {
+      return { assetId, text: '', warnings: [],
+        parseError: String(error instanceof Error ? error.message : '文档解析失败').slice(0, 1500) };
+    }
   }
 
   private path(assetId: string) {

@@ -2183,10 +2183,15 @@ h3 { font-size: 13px; font-weight: 650; }
 .document-import-result { padding: 12px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .document-import-result b { font-size: 13px; }
 .document-import-result .btn { margin-top: 8px; }
+.chat-active-model { max-width: 240px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.send-btn:disabled { opacity: .55; cursor: wait; }
 @media (max-width: 680px) {
   .custom-provider-grid { grid-template-columns: minmax(0, 1fr); }
   .profile-modal .modal-body { padding: 14px; }
   .custom-provider-head .chip { white-space: normal; }
+  .composer-bar { flex-wrap: wrap; }
+  .chat-active-model { order: -1; flex: 0 0 100%; max-width: 100%; font-size: 10px; }
+  .composer-bar .send-btn { flex-shrink: 0; }
 }
 
 .profile-preview {

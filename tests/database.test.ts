@@ -63,6 +63,21 @@ test('invalid snapshots cannot replace the last valid data', () => {
   });
 });
 
+test('document text beyond the old 8 MB snapshot cap survives reopening', () => {
+  withStore((store, path) => {
+    const snapshot = fixture();
+    snapshot.db.documents = [{ id: 'large-text', content: '测'.repeat(3_000_000) }];
+    store.save(snapshot);
+    const reopened = new WorkbenchStore(path, codec);
+    try { assert.equal((reopened.load()!.db.documents as { content: string }[])[0].content.length, 3_000_000); }
+    finally { reopened.close(); }
+    const oversized = fixture();
+    oversized.db.documents = [{ content: 'x'.repeat(64_000_001) }];
+    assert.throws(() => store.save(oversized), /64|过大|容量|上限/);
+    assert.equal((store.load()!.db.documents as { content: string }[])[0].content.length, 3_000_000);
+  });
+});
+
 test('projection errors roll back the full snapshot and all task changes', () => {
   withStore(store => {
     store.save(fixture());

@@ -11,6 +11,10 @@ const evidence = resolve(root, '.desktop-test');
 mkdirSync(evidence, { recursive: true });
 const dataDirectory = process.env.XIAOYU_TEST_DATA_DIR || mkdtempSync(join(evidence, 'profile-'));
 const errors = [];
+async function screenshot(page, name) {
+  if (process.env.XIAOYU_SKIP_SCREENSHOTS === '1') return;
+  await page.screenshot({ path: join(evidence, name), scale: 'css', timeout: 15000 });
+}
 const calendarStart = new Date();
 calendarStart.setDate(calendarStart.getDate() + 1);
 const calendarEnd = new Date(calendarStart.getTime() + 3600000);
@@ -76,7 +80,7 @@ try {
   await page.waitForFunction(() =>
     document.querySelector('.report-body')?.textContent.includes('桌面端持久化验收任务'));
   await finishAnimations(page);
-  await page.screenshot({ path: join(evidence, 'desktop-daily-report.png'), scale: 'css' });
+  await screenshot(page, 'desktop-daily-report.png');
   await page.evaluate(() => persistWorkbench());
   const persisted = await page.evaluate(() => window.xiaoyuDesktop.load());
   assert.equal(persisted.db.sourceItems.length, 2);
@@ -134,7 +138,7 @@ try {
   await page.locator('[data-action="nav"][data-view="projects"]').first().click();
   await page.locator('.project-register').scrollIntoViewIfNeeded();
   await finishAnimations(page);
-  await page.screenshot({ path: join(evidence, 'desktop-projects.png'), scale: 'css' });
+  await screenshot(page, 'desktop-projects.png');
   await page.locator('[data-action="nav"][data-view="data"]').click();
   for (const id of ['feishu', 'dingtalk', 'wecom', 'mail', 'ics']) {
     await page.locator(`.connector-card[data-id="${id}"]`).click();
@@ -159,7 +163,7 @@ try {
   await page.waitForFunction(() => DB.integrationLogs.filter(log => log.connectorId === 'ics' && log.action === 'sync').length === 2);
   assert.equal(await page.evaluate(() => DB.inbox.length), inboxBeforeSync + 1);
   await finishAnimations(page);
-  await page.screenshot({ path: join(evidence, 'desktop-integration-ics.png'), scale: 'css' });
+  await screenshot(page, 'desktop-integration-ics.png');
   await page.locator('.integration-modal [data-action="close-modal"]').click();
   await page.locator('.connector-card[data-id="dingtalk"]').click();
   await page.locator('#integration-appKey').fill('qa-dingtalk-app');
@@ -220,16 +224,18 @@ try {
   await page.evaluate(() => persistWorkbench());
   assert.equal(await page.evaluate(async () => !!(await window.xiaoyuDesktop.load()).db.settings.integrations.dingtalk), false);
   await finishAnimations(page);
-  await page.screenshot({ path: join(evidence, 'desktop-integrations.png'), scale: 'css' });
+  await screenshot(page, 'desktop-integrations.png');
   await finishAnimations(page);
-  await page.screenshot({ path: join(evidence, 'desktop-after-restart.png'), scale: 'css' });
+  await screenshot(page, 'desktop-after-restart.png');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: true, dataDirectory, recovered }));
 } catch (error) {
   if (application) {
     const page = application.windows()[0];
     if (page) {
-      await page.screenshot({ path: join(evidence, 'desktop-failure.png') }).catch(() => {});
+      if (process.env.XIAOYU_SKIP_SCREENSHOTS !== '1') {
+        await page.screenshot({ path: join(evidence, 'desktop-failure.png'), timeout: 5000 }).catch(() => {});
+      }
       console.error(await page.locator('body').innerText().catch(() => 'No page content'));
     }
   }

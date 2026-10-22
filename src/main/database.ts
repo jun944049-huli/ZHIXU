@@ -66,7 +66,7 @@ export class WorkbenchStore {
       delete stored.preferences['jw-settings'];
     }
     const payload = JSON.stringify(stored);
-    if (Buffer.byteLength(payload) > 8_000_000) throw new Error('工作数据过大，保存已取消');
+    if (Buffer.byteLength(payload) > 64_000_000) throw new Error('工作数据超过 64 MB，保存已取消；请先导出整理附件记录');
 
     this.db.exec('BEGIN IMMEDIATE');
     try {
