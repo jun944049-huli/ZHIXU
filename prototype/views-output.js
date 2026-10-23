@@ -95,14 +95,18 @@ function emptyReport(period, key) {
 }
 
 function buildReportFromTasks(key, period) {
-  const tasks = key === 'daily'
+  const scheduled = key === 'daily'
     ? tasksOnDate(period.date)
     : tasksInRange(period.start, period.end);
+  const start = key === 'daily' ? period.date : period.start;
+  const end = key === 'daily' ? period.date : period.end;
+  const completed = allWorkbenchTasks().filter(task => task.done && task.completedDate >= start && task.completedDate <= end);
+  const tasks = [...new Map([...scheduled, ...completed].map(task => [task.id, task])).values()];
   if (!tasks.length) return emptyReport(period, key);
 
   const done = tasks.filter(t => t.done);
   const open = tasks.filter(t => !t.done);
-  const overdue = tasks.filter(t => t.overdue);
+  const overdue = tasks.filter(isTaskOverdue);
   const projectLabel = t => {
     const p = projectById(t.project);
     return p ? p.name : '未归属';

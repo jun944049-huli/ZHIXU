@@ -513,6 +513,14 @@ summary { cursor: pointer; }
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
 /* Plugins share the connector grid, with a separate installation lifecycle. */
+.milestone-links { max-height: 240px; overflow: auto; }
+.milestone-task-choice { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; overflow-wrap: anywhere; }
+.milestone-task-choice input { flex: 0 0 auto; margin-top: 4px; }
+.chat-bubble { overflow-wrap: anywhere; }
+.chat-work-summary { white-space: pre-line; }
+.chat-work-details { margin-top: 12px; }
+.chat-work-details > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.chat-work-details .action-items { max-height: 320px; overflow: auto; }
 .plugin-entry { border-top: 1px solid var(--line, #e4e6eb); padding-top: 24px; margin-top: 32px; }
 .plugin-empty { min-height: 260px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; border: 1px dashed var(--line, #e4e6eb); border-radius: 8px; padding: 32px 20px; text-align: center; }
 .plugin-empty h3, .plugin-empty p { margin: 0; }

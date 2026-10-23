@@ -28,7 +28,7 @@ function renderProjects() {
       </div>
       <div class="pc-foot">
         <div class="avatar-stack">${p.members.map(m => avatar(m, 'sm')).join('')}</div>
-        <span class="updated">${esc(p.updated)}更新</span>
+        <span class="updated">${p.status ? esc(p.status) + ' · ' : ''}${esc(p.updated)}更新</span>
       </div>
     </button>
   `).join('');
@@ -96,9 +96,9 @@ function detailForProject(p) {
       { label: '阻塞', value: '0', sub: '平均 0 天', trend: '0', tone: 'ink' },
       { label: '需求变更', value: '0', sub: '未记录', trend: '', tone: 'ink' }
     ],
-    milestones: [
+    milestones: p.next && !['未安排', '待安排', '项目已完成'].includes(p.next) ? [
       { id: `milestone-${p.id}`, name: p.next, date: p.nextDate, status: p.health === 'red' ? 'risk' : 'open' }
-    ],
+    ] : [],
     risks: [],
     activity: [
       { time: '今天', text: '项目健康度更新为「' + healthLabel(p.health) + '」', tone: p.health === 'red' ? 'red' : p.health === 'amber' ? 'accent' : 'green' }
@@ -131,7 +131,7 @@ function scoreClass(level) {
 function renderProject() {
   const p = projectById(state.projectId) || DB.projects[0];
   if (!p) return renderProjects();
-  const detail = detailForProject(p);
+  const detail = { ...detailForProject(p), milestones: projectMilestones(p.id) };
   const liveTasks = allWorkbenchTasks().filter(t => t.project === p.id);
   const projectTasks = liveTasks.map(t => ({
     ...t, status: t.done ? '已完成' : t.blocked ? '阻塞' : isTaskOverdue(t) ? '逾期' : t.status === '进行中' ? '进行中' : '待开始'
@@ -169,6 +169,7 @@ function renderProject() {
       <span class="ms-dot ${m.status}"></span>
       <div>
         <div class="ms-name">${esc(m.name)}</div>
+        <div class="small muted">${m.status === 'done' ? '已完成' : '未完成'}${milestoneTaskIds(p.id, m).length ? ` · ${m.progress || 0}% · ${milestoneTaskIds(p.id, m).length} 项任务` : ''}</div>
         ${m.note ? `<div class="ms-note">${esc(m.note)}</div>` : ''}
       </div>
       <span class="ms-date">${esc(m.date)}</span>
@@ -406,7 +407,7 @@ function renderProject() {
         <div class="row gap-8">
           <span class="health ${p.health}">${healthLabel(p.health)}</span>
           <span class="chip outline">${esc(p.code)}</span>
-          <span class="chip">${p.progress}% 完成</span>
+          <span class="chip">${p.progress}% 完成${p.status ? ' · ' + esc(p.status) : ''}</span>
         </div>
         <h1 class="mt-8">${esc(p.name)}</h1>
         <p class="detail-goal">${esc(p.goal)}</p>

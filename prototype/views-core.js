@@ -260,7 +260,7 @@ function renderToday() {
     taskBody = dayTasks.length ? taskSection('当天安排 · Scheduled', dayTasks, dayTasks.length) : emptyDay;
   }
 
-  const waiting = DB.waiting.map(w => `
+  const waiting = DB.waiting.filter(w => w.status !== 'done').map(w => `
     <div class="wait-row">
       <div class="wait-title">${esc(w.title)}</div>
       <div class="wait-age ${w.days >= 3 ? 'hot' : ''}">${w.days} 天</div>
@@ -424,7 +424,7 @@ function renderToday() {
 
         <section class="rail-card">
           <div class="rail-head">
-            <h3>${icon('clock', 14)} 等待跟进 <span class="chip">${DB.waiting.length}</span></h3>
+            <h3>${icon('clock', 14)} 等待跟进 <span class="chip">${DB.waiting.filter(w => w.status !== 'done').length}</span></h3>
             <button class="icon-btn sm" data-action="waiting" aria-label="管理等待事项">${icon('arrowRight', 13)}</button>
           </div>
           <div class="wait-list">${waiting || '<p class="quiet-empty">暂无等待事项</p>'}</div>

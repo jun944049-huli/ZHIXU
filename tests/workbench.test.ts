@@ -21,8 +21,8 @@ function workbench() {
     scrollChatToBottom: () => {},
     persistWorkbench: async () => { saved.push(runInContext('JSON.stringify(DB)', context)); }
   });
-  for (const file of ['data.js', 'shared.js', 'views-chat.js', 'views-project.js', 'views-output.js',
-    'operations.js', 'integrations.js', 'features.js', 'analytics.js', 'documents.js', 'workspace.js', 'plugins.js']) {
+  for (const file of ['data.js', 'shared.js', 'chat-format.js', 'views-chat.js', 'views-project.js', 'views-output.js',
+    'operations.js', 'work-sync.js', 'integrations.js', 'features.js', 'analytics.js', 'documents.js', 'workspace.js', 'plugins.js']) {
     runInContext(readFileSync(resolve('prototype', file), 'utf8'), context, { filename: file });
   }
   runInContext('initializeIntegrations(); initializeFeatures();', context);
@@ -45,6 +45,128 @@ test('overdue migration preserves independent projects, completed tasks and task
   w.run('initializeFeatures(); initializeFeatures()');
   assert.equal(w.run('allWorkbenchTasks().length'), 2);
   assert.equal(w.run('DB.overdue.length'), 0);
+});
+
+function seedWorkUpdate(w: ReturnType<typeof workbench>) {
+  w.run(`DB.tasks={must:[],should:[],could:[]}; DB.taskCalendar={};
+    DB.projects=DB.projects.filter(p=>['p1','p2'].includes(p.id));
+    projectById('p1').name='青禾小学';
+    DB.projectDetails.p1.milestones=[
+      {id:'repair-ms',name:'维修完成',date:'2026-10-20',status:'open',taskIds:['repair-a','repair-b']},
+      {id:'deploy-ms',name:'设备部署',date:'2026-10-30',status:'open',taskIds:['deploy']},
+      {id:'accept-ms',name:'联调验收',date:'2026-11-01',status:'open',taskIds:['accept']}];
+    for(const [id,title,project] of [
+      ['repair-a','维修灯具','p1'],['repair-b','维修门窗','p1'],
+      ['deploy','设备部署','p1'],['accept','联调验收','p1'],['other','维修灯具','p2']]) {
+      addConfirmedTask({id,title,project,done:false,estimate:'1h',priority:'P2',
+        due:addDaysISO(DB.meta.today,-1)},id==='repair-a'?addDaysISO(DB.meta.today,-3):DB.meta.today,'should');
+    }
+    DB.documents=[{id:'source-doc',projectId:'p1',analysis:{tasks:[{taskId:'repair-a'},{taskId:'deploy'}]}}];
+    DB.waiting=[{id:'linked-wait',title:'等待维修灯具',taskId:'repair-a',project:'p1'}];
+    DB.runningTimer={taskId:'repair-a',project:'p1',startedAt:Date.now()-10000,date:DB.meta.today};
+    window.repairUpdate={type:'work_update',projectId:'p1',tasks:[
+      {taskId:'repair-a',status:'done'},{taskId:'repair-b',status:'done'}],milestones:[]};`);
+}
+
+test('completion updates linked milestones, progress, overdue, documents, waiting and completion-day reports', () => {
+  const w = workbench(); seedWorkUpdate(w);
+  w.run("window.card=modelWorkUpdateCard([window.repairUpdate],'青禾小学维修全部完成'); applyWorkUpdateCard(window.card)");
+  assert.equal(w.run("taskLocation('repair-a').task.status"), '已完成');
+  assert.equal(w.run("taskLocation('other').task.done"), false);
+  assert.equal(w.run("DB.projectDetails.p1.milestones[0].status"), 'done');
+  assert.equal(w.run("DB.projectDetails.p1.milestones[1].status"), 'risk');
+  assert.equal(w.run("projectById('p1').progress"), 50);
+  assert.equal(w.run("projectById('p1').next"), '设备部署');
+  assert.equal(w.run("projectById('p1').open"), 2);
+  assert.equal(w.run("overdueTasks().some(t=>t.id==='repair-a')"), false);
+  assert.equal(w.run("DB.runningTimer"), null);
+  assert.equal(w.run("DB.timeEntries.length"), 1);
+  assert.equal(w.run("DB.documents[0].analysis.tasks[0].done"), true);
+  assert.equal(w.run("DB.waiting[0].status"), 'done');
+  assert.match(w.run("JSON.stringify(getReport('daily',DB.meta.today))"), /维修灯具/);
+  assert.equal(w.run("allWorkbenchTasks().length"), 5);
+  assert.equal(w.run("projectNotesFor('p1')[0].source"), '对话状态同步');
+});
+
+test('manual reopening and completing tasks reconcile the same project and keep incomplete milestones below 100%', () => {
+  const w = workbench(); seedWorkUpdate(w);
+  w.run("applyWorkUpdateCard(modelWorkUpdateCard([window.repairUpdate],'维修完成'))");
+  w.run("toggleTask('repair-a')");
+  assert.equal(w.run("DB.projectDetails.p1.milestones[0].status"), 'risk');
+  assert.equal(w.run("projectById('p1').progress"), 25);
+  assert.equal(w.run("DB.documents[0].analysis.tasks[0].done"), false);
+  w.run("toggleTask('repair-a'); toggleTask('deploy'); toggleTask('accept')");
+  assert.equal(w.run("projectById('p1').progress"), 100);
+  assert.equal(w.run("projectById('p1').status"), '已完成');
+  w.run("DB.projectDetails.p1.milestones.push({id:'untracked',name:'最终确认',status:'open'}); reconcileProjectWork(['p1'])");
+  assert.equal(w.run("projectById('p1').progress"), 99);
+  assert.equal(w.run("projectById('p1').next"), '最终确认');
+});
+
+test('generated empty milestones do not block project completion and new milestones have no implicit links', () => {
+  const w = workbench(); seedWorkUpdate(w);
+  assert.equal(w.run("milestoneTaskIds('p1',{}).length"), 0);
+  w.run(`DB.projectDetails.p1.milestones=[{id:'milestone-p1',name:'未安排',date:'—',status:'open'}];
+    allWorkbenchTasks().filter(task=>task.project==='p1').forEach(task=>setWorkTaskStatus(task,'done'));
+    reconcileProjectWork(['p1']);`);
+  assert.equal(w.run("projectById('p1').progress"), 100);
+  assert.equal(w.run("projectMilestones('p1').length"), 0);
+  assert.equal(w.run("DB.projectDetails.p1.milestones.length"), 1);
+  w.run("DB.projectDetails.p1.milestones.push({id:'user-node',name:'待安排',date:'—',status:'open'}); reconcileProjectWork(['p1'])");
+  assert.equal(w.run("projectMilestones('p1').length"), 1);
+  assert.equal(w.run("projectById('p1').progress"), 99);
+});
+
+test('editing an already completed legacy task retains its original completion day', () => {
+  const w = workbench(); seedWorkUpdate(w);
+  w.run(`Object.assign(taskLocation('repair-a').task,{done:true,completedAt:'2026-10-19T08:00:00.000Z'});
+    setWorkTaskStatus(taskLocation('repair-a').task,'done');`);
+  assert.equal(w.run("taskLocation('repair-a').task.completedDate"), '2026-10-19');
+  assert.doesNotMatch(w.run("JSON.stringify(getReport('daily',DB.meta.today))"), /维修灯具（青禾小学/);
+});
+
+test('stale, cross-project and premature milestone updates are rejected before any mutation', () => {
+  const w = workbench(); seedWorkUpdate(w);
+  w.run("window.card=modelWorkUpdateCard([window.repairUpdate],'维修完成'); taskLocation('repair-b').task.title='已编辑标题'");
+  assert.throws(() => w.run('applyWorkUpdateCard(window.card)'), /已变更/);
+  assert.equal(w.run("taskLocation('repair-a').task.done"), false);
+  w.run("window.bad={type:'work_update',projectId:'p1',tasks:[{taskId:'other',status:'done'}],milestones:[]}");
+  assert.throws(() => w.run("applyWorkUpdateCard(modelWorkUpdateCard([window.bad],'完成'))"), /归属/);
+  w.run("window.bad={type:'work_update',projectId:'p1',tasks:[{taskId:'repair-a',status:'done'}],milestones:[{milestoneId:'repair-ms',status:'done'}]}");
+  assert.throws(() => w.run("applyWorkUpdateCard(modelWorkUpdateCard([window.bad],'维修完成'))"), /仍有关联任务未完成/);
+  w.run("window.bad.milestones[0].taskIds=['repair-a']");
+  assert.throws(() => w.run("applyWorkUpdateCard(modelWorkUpdateCard([window.bad],'维修完成'))"), /仍有关联任务未完成/);
+  assert.equal(w.run("taskLocation('repair-a').task.done"), false);
+});
+
+test('explicit status statements sync once; questions stay pending and save failures restore the whole update', async () => {
+  const w = workbench(); seedWorkUpdate(w);
+  w.fields['chat-input'] = { value: '青禾小学维修部分已经全部完成了', checkValidity: () => true };
+  w.run(`DB.settings.aiProvider='custom'; DB.settings.customProvider={
+    name:'验收模型',baseUrl:'http://127.0.0.1',apiKey:'isolated',model:'semantic-model'};
+    window.xiaoyuDesktop={chat:async()=>({reply:'维修完成',model:'semantic-model',warnings:[],actions:[window.repairUpdate]})};`);
+  await w.run('sendChat()');
+  assert.equal(w.run("taskLocation('repair-a').task.done"), true);
+  assert.equal(w.run("state.chatMessages.at(-1).actionCard.status"), 'done');
+  await w.run('applyChatAction()');
+  assert.equal(w.run("projectNotesFor('p1').filter(n=>n.source==='对话状态同步').length"), 1);
+  w.fields['chat-input'].value = '部署完成了';
+  w.run("window.repairUpdate={type:'work_update',projectId:'p1',requiresConfirmation:true,tasks:[{taskId:'deploy',status:'done'}],milestones:[]}");
+  await w.run('sendChat()');
+  assert.equal(w.run("taskLocation('deploy').task.done"), false);
+  assert.equal(w.run("state.chatMessages.at(-1).actionCard.status"), 'pending');
+  w.run("cancelChat()");
+  w.fields['chat-input'].value = '如果设备部署完成，是否可以验收？';
+  w.run("window.repairUpdate={type:'work_update',projectId:'p1',tasks:[{taskId:'deploy',status:'done'}],milestones:[]}");
+  await w.run('sendChat()');
+  assert.equal(w.run("taskLocation('deploy').task.done"), false);
+  assert.equal(w.run("state.chatMessages.at(-1).actionCard.status"), 'pending');
+  w.run("persistWorkbench=async()=>{throw new Error('磁盘已满')}");
+  await w.run('applyChatAction()');
+  assert.equal(w.run("taskLocation('deploy').task.done"), false);
+  assert.equal(w.run("projectById('p1').progress"), 50);
+  assert.equal(w.run("state.chatMessages.at(-1).actionCard.status"), 'pending');
+  assert.match(w.run('state.chatMessages.at(-1).text'), /磁盘已满/);
 });
 
 test('saving overdue edits, rescheduling and completing one task update only its reminder', async () => {

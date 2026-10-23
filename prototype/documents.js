@@ -284,7 +284,8 @@ function openDocumentEditor(id, keepDraft = false) {
     <div class="row document-task-heading"><h3>任务拆解 · ${draft.tasks.length}</h3>
       <button class="btn btn-sm" data-action="document-task-add">${icon('plus', 12)} 添加任务</button></div>
     <div class="document-task-list">${draft.tasks.map((task, index) => `<fieldset class="document-task-row" data-document-task="${index}">
-      <legend class="small muted">${index + 1} · ${task.taskId ? taskLocation(task.taskId) ? '已生成任务' : '任务已移除' : '候选任务'}</legend>
+      <legend class="small muted">${index + 1} · ${task.taskId ? taskLocation(task.taskId) ? taskLocation(task.taskId).task.done ?
+        '已完成' : taskLocation(task.taskId).task.status || '待开始' : '任务已移除' : '候选任务'}</legend>
       <div class="document-task-title"><label class="document-choice"><input type="checkbox" id="draft-selected-${index}" ${task.selected !== false ? 'checked' : ''} ${task.taskId ? 'disabled' : ''}>生成</label>
         <input class="input" id="draft-title-${index}" aria-label="任务 ${index + 1} 标题" value="${esc(task.title)}" maxlength="200">
         ${task.taskId ? '' : `<button class="icon-btn sm" data-action="document-task-remove" data-index="${index}" title="移除候选任务" aria-label="移除候选任务 ${index + 1}">${icon('trash', 13)}</button>`}</div>

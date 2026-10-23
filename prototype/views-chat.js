@@ -121,7 +121,7 @@ function renderChatMessage(m) {
     `${esc(assistantName())} · <span class="chat-message-model" title="${esc(model)}">${esc(model)}</span> · ${esc(m.time)}`;
   const text = isUser
     ? String(m.text || '')
-    : String(m.text || '').replace(/^早上好，[^。]+。/, `早上好，${DB.user.name}。`);
+    : ZhixuChatFormatting.display(String(m.text || '')).replace(/^早上好，[^。]+。/, `早上好，${DB.user.name}。`);
   return `
     <div class="chat-msg ${isUser ? 'user' : 'assistant'}">
       ${avatar}
@@ -137,7 +137,9 @@ function renderChatMessage(m) {
             <div class="note-logged-text">${esc(m.loggedNote.text)}</div>
           </div>
         ` : ''}
-        ${m.actionCard ? renderChatActionCard(m.actionCard) : ''}
+        ${m.actionCard ? m.actionCard.type === 'work_update' && m.actionCard.status === 'done' ?
+          `<details class="chat-work-details"><summary>查看同步详情</summary>${renderChatActionCard(m.actionCard)}</details>` :
+          renderChatActionCard(m.actionCard) : ''}
         ${m.retryOf ? `<button class="btn btn-sm mt-8" data-action="chat-retry" data-id="${esc(m.retryOf)}">${icon('refresh', 12)} 重试模型请求</button>` : ''}
         ${m.quick ? renderChatQuick(m.quick) : ''}
         <div class="chat-meta">${meta}</div>
@@ -435,6 +437,7 @@ function modelChatContext() {
   }
   const tasks = allWorkbenchTasks().filter(relevant).slice(-150).map(task => ({
     id: task.id, title: task.title, projectId: task.project || null, done: !!task.done,
+    status: workTaskStatus(task), progress: taskWorkProgress(task),
     due: task.due, date: taskDates.get(task.id), assignee: task.assignee || '', estimate: task.estimate, priority: task.priority
   }));
   const projects = DB.projects.filter(project => !selected || project.id === selected).slice(0, 100)
@@ -442,9 +445,14 @@ function modelChatContext() {
       goal: String(project.goal || '').slice(0, 500), owner: project.owner,
       risks: (DB.projectDetails[project.id]?.risks || []).filter(risk => risk.status !== 'closed')
         .slice(0, 10).map(risk => ({ title: risk.title, level: risk.level })) }));
+  const milestones = DB.projects.filter(project => !selected || project.id === selected)
+    .flatMap(project => projectMilestones(project.id).map(item => ({
+      id: item.id, projectId: project.id, name: item.name, status: item.status,
+      taskIds: milestoneTaskIds(project.id, item)
+    }))).slice(0, 500);
   const documents = DB.documents.filter(doc => !doc.parseError && relevant(doc)).slice(-4).map(doc => ({
     title: doc.title, projectId: doc.projectId, summary: doc.analysis?.summary || '',
-    excerpt: doc.content.slice(0, 8000), excerptOnly: doc.content.length > 8000
+    excerpt: String(doc.content || '').slice(0, 8000), excerptOnly: String(doc.content || '').length > 8000
   }));
   const data = { projects, tasks, documents, capacity: DB.capacity,
     workflow: String(DB.workflow.text || '').slice(0, 2000),
@@ -455,7 +463,9 @@ function modelChatContext() {
   while (encoded.length > 100000 && data.tasks.length) { data.tasks.shift(); encoded = JSON.stringify(data); }
   while (encoded.length > 100000 && data.projects.length) { data.projects.pop(); encoded = JSON.stringify(data); }
   return { today: DB.meta.today, selectedProjectId: selected,
-    projects: DB.projects.slice(0, 500).map(project => ({ id: project.id, name: project.name })), data: encoded };
+    projects: DB.projects.slice(0, 500).map(project => ({ id: project.id, name: project.name })),
+    tasks: tasks.map(({ id, title, projectId, status, progress }) => ({ id, title, projectId, status, progress })),
+    milestones, data: encoded };
 }
 
 function modelChatCard(action, raw) {
@@ -514,20 +524,37 @@ async function sendChat(retryId = '') {
       if (!window.xiaoyuDesktop?.chat) throw new Error('当前预览未接入模型对话，请使用更新后的桌面版');
       const history = state.chatMessages.slice(0, state.chatMessages.indexOf(user) + 1)
         .filter(message => ['user', 'assistant'].includes(message.role) && !message.retryOf)
-        .slice(-24).map(message => ({ role: message.role, content: String(message.text).slice(0, 20000) }));
+        .slice(-24).map(message => ({ role: message.role, content: (message.role === 'assistant' ?
+          ZhixuChatFormatting.display(String(message.text)) : String(message.text)).slice(0, 20000) }));
+      const context = modelChatContext();
       const result = await window.xiaoyuDesktop.chat({
         provider: { baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: provider.model,
           protocol: provider.protocol || 'auto', name: provider.name },
-        messages: history, context: modelChatContext()
+        messages: history, context
       });
+      if (state.chatRequestId !== requestId) return;
       const model = String(result.model || '').trim() || provider.model;
       const cards = result.actions.map(action => modelChatCard(action, text)).filter(Boolean);
+      const updates = result.actions.filter(action => action.type === 'work_update');
+      const automatic = canAutoSyncWork(text) && updates.every(action => !action.requiresConfirmation);
+      const workCard = updates.length ? modelWorkUpdateCard(updates, text, context) : null;
+      const otherCards = cards.filter(card => card.type !== 'work_update');
       const reply = { role: 'assistant', time: '现在', model,
-        text: result.reply + (result.warnings.length ? '\n\n' + result.warnings.join('\n') : '') };
-      if (cards.length) reply.actionCard = cards[0];
-      replies = [reply, ...cards.slice(1).map(actionCard => ({
+        text: ZhixuChatFormatting.display(result.reply) + (result.warnings.length ? '\n\n' + result.warnings.join('\n') : '') };
+      if (workCard) {
+        reply.actionCard = workCard;
+        reply.text = automatic ? '正在同步工作状态。' : '请确认这组工作状态变更。';
+      } else if (otherCards.length) reply.actionCard = otherCards.shift();
+      else if (canAutoSyncWork(text)) reply.text += '\n\n本次未匹配到可更新的任务，工作区尚未修改。请指定任务名称或选择项目范围。';
+      replies = [reply, ...otherCards.map(actionCard => ({
         role: 'assistant', time: '现在', model, text: '另有一项待确认操作。', actionCard
       }))];
+      if (workCard && automatic) {
+        state.chatMessages.push(...replies);
+        await applyWorkUpdateMessage(reply, true);
+        if (result.warnings.length) reply.text += '\n\n' + result.warnings.join('\n');
+        replies = [];
+      }
     }
     if (state.chatRequestId !== requestId) return;
     state.chatMessages.push(...replies);
@@ -555,6 +582,7 @@ async function applyChatAction(mode, cardId) {
     return;
   }
   const card = cardMsg.actionCard;
+  if (card.type === 'work_update') { await applyWorkUpdateMessage(cardMsg); return; }
   const p = card.projectId ? projectById(card.projectId) : null;
   if (card.projectId && !p) {
     showToast('关联项目已删除，请取消这条草稿后重新输入');

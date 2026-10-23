@@ -143,15 +143,12 @@ async function saveTaskEditor() {
     showToast('请填写标题、日期和有效的预计小时'); return;
   }
   const t = found.task;
+  const previousProject = t.project;
   const previousDue = String(t.due || '');
   const previousDeadline = taskDeadlineDate(t);
   const status = fieldValue('task-status');
   if (status) {
-    t.done = status === 'done';
-    t.blocked = status === 'blocked';
-    t.status = status === 'doing' ? '进行中' : status === 'done' ? '已完成' : '待开始';
-    t.completedAt = t.done ? t.completedAt || new Date().toISOString() : null;
-    if (t.done && DB.runningTimer?.taskId === t.id) stopTaskTimer();
+    setWorkTaskStatus(t, status === 'open' ? 'todo' : status);
   }
   Object.assign(t, {
     title: fieldValue('task-title'), project: fieldValue('task-project') || null,
@@ -168,6 +165,7 @@ async function saveTaskEditor() {
   t.overdue = isTaskOverdue(t);
   found.list.splice(found.index, 1);
   addConfirmedTask(t, date, ['P0', 'P1'].includes(t.priority) ? 'must' : t.priority === 'P4' ? 'could' : 'should');
+  reconcileProjectWork([previousProject, t.project]);
   await finishLocal('任务已保存');
 }
 
@@ -362,7 +360,11 @@ function openRecordEditor(kind, id) {
     selectField('record-status', '状态', [['open', '处理中'], ['closed', '已关闭']], record.status || 'open') + customFieldInputs('risk', record);
   if (kind === 'milestone') body = inputField('record-title', '节点名称', record.name) +
     inputField('record-date', '日期', record.date || DB.meta.today) + textField('record-note', '备注', record.note) +
-    selectField('record-status', '状态', [['open', '未完成'], ['risk', '有风险'], ['done', '已完成']], record.status || 'open');
+    selectField('record-status', '状态', [['open', '未完成'], ['risk', '有风险'], ['done', '已完成']], record.status || 'open') +
+    `<div class="field full milestone-links"><label>关联任务</label>${allWorkbenchTasks().filter(task => task.project === state.projectId)
+      .map(task => `<label class="milestone-task-choice"><input type="checkbox" data-milestone-task="${esc(task.id)}"
+        ${milestoneTaskIds(state.projectId, record).includes(task.id) ? 'checked' : ''}>${esc(task.title)}</label>`).join('') ||
+      '<p class="small muted">暂无项目任务</p>'}</div>`;
   if (kind === 'waiting') body = inputField('record-title', '等待事项', record.title) +
     inputField('record-owner', '等待谁', record.person) + inputField('record-days', '已等待天数', record.days || 0, 'number', 'min="0" max="3650"') +
     selectField('record-project', '项目', projectChoices(), record.project || '') + textField('record-note', '影响', record.impact);
@@ -402,7 +404,12 @@ async function saveRecordEditor() {
       owner: fieldValue('record-owner'), status: fieldValue('record-status'), customValues: { ...item.customValues, ...readCustomFields('risk') } });
   } else if (editor.kind === 'milestone') {
     if (!fieldValue('record-date')) { showToast('请填写日期'); return; }
-    Object.assign(item, { name: title, note, date: fieldValue('record-date'), status: fieldValue('record-status') });
+    const taskIds = [...document.querySelectorAll('[data-milestone-task]:checked')].map(input => input.dataset.milestoneTask);
+    if (fieldValue('record-status') === 'done' && taskIds.some(id => !taskLocation(id)?.task.done)) {
+      showToast('关联任务尚未全部完成，请先完成任务或调整关联范围'); return;
+    }
+    Object.assign(item, { name: title, note, date: fieldValue('record-date'), status: fieldValue('record-status'),
+      taskIds });
   } else if (editor.kind === 'waiting') {
     const days = Number(fieldValue('record-days'));
     if (!Number.isInteger(days) || days < 0 || days > 3650) { showToast('等待天数须为 0 到 3650'); return; }
@@ -416,6 +423,7 @@ async function saveRecordEditor() {
   }
   if (!editor.id) list.push(item);
   if (editor.kind === 'risk') projectById(editor.projectId).risks = list.filter(r => r.status !== 'closed').length;
+  if (editor.kind === 'milestone') reconcileProjectWork([editor.projectId]);
   await finishLocal('记录已保存');
 }
 
@@ -434,11 +442,12 @@ async function removeEditorRecord() {
   DB.recordArchive.push({ ...editor, record: list[index], removedAt: new Date().toISOString() });
   list.splice(index, 1);
   if (editor.kind === 'risk') projectById(editor.projectId).risks = list.filter(r => r.status !== 'closed').length;
+  if (editor.kind === 'milestone') reconcileProjectWork([editor.projectId]);
   await finishLocal('记录已移除并归档');
 }
 
 function openWaiting() {
-  localModal('等待事项', `<div class="feature-list">${DB.waiting.map(w => `<div class="feature-list-row"><div><b>${esc(w.title)}</b><p class="small muted">${esc(w.person)} · ${w.days} 天 · ${esc(w.impact)}</p></div>
+  localModal('等待事项', `<div class="feature-list">${DB.waiting.filter(w => w.status !== 'done').map(w => `<div class="feature-list-row"><div><b>${esc(w.title)}</b><p class="small muted">${esc(w.person)} · ${w.days} 天 · ${esc(w.impact)}</p></div>
     <button class="icon-btn" aria-label="编辑等待事项" data-action="record-edit" data-kind="waiting" data-id="${esc(w.id)}">${icon('edit', 14)}</button></div>`).join('') || '暂无等待事项'}</div>`,
     '<button class="btn btn-primary" data-action="record-edit" data-kind="waiting">新增等待事项</button>');
 }
@@ -455,7 +464,7 @@ function openNotifications() {
   localModal('本地简报', `<div class="feature-list">
     <p>待确认 ${DB.inbox.length} 条 · 等待事项 ${DB.waiting.length} 条</p>
     ${DB.runningTimer ? `<p>正在计时：${esc(DB.runningTimer.title)}</p>` : ''}
-    ${followed.flatMap(p => detailForProject(p).milestones.filter(m => m.status !== 'done').map(m =>
+    ${followed.flatMap(p => projectMilestones(p.id).filter(m => m.status !== 'done').map(m =>
       `<p>${esc(p.name)} · ${esc(m.name)} · ${esc(m.date)}</p>`)).join('') || '<p class="muted">暂无关注的里程碑</p>'}</div>`);
 }
 
@@ -543,6 +552,7 @@ function handleFeatureAction(action, el) {
       if (DB.runningTimer?.taskId === found.task.id) stopTaskTimer();
       DB.taskArchive.push({ ...found.task, removedAt: new Date().toISOString() });
       found.list.splice(found.index, 1);
+      reconcileProjectWork([found.task.project]);
       void finishLocal('任务已移除并归档'); break;
     }
     case 'task-timer': void toggleTimer(id); break;

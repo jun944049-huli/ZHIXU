@@ -13,15 +13,90 @@ function updateTaskCapacity() {
   DB.capacity.buffer = Math.max(0, Math.round((DB.capacity.available - DB.capacity.committed) * 10) / 10);
 }
 
+function workTaskStatus(task) {
+  return task.done ? 'done' : task.blocked ? 'blocked' : task.status === '进行中' ? 'doing' : 'todo';
+}
+
+function taskWorkProgress(task) {
+  return task.done ? 100 : Math.min(99, Math.max(0, Number(task.progress) || 0));
+}
+
+function setWorkTaskStatus(task, status, progress) {
+  const previousCompletion = task.done && task.completedAt ? new Date(task.completedAt) : null;
+  task.done = status === 'done';
+  task.blocked = status === 'blocked';
+  task.status = { todo: '待开始', doing: '进行中', blocked: '阻塞', done: '已完成' }[status];
+  task.progress = task.done ? 100 : progress === undefined ? task.progress >= 100 ? 0 : taskWorkProgress(task) : Math.min(99, progress);
+  task.completedAt = task.done ? task.completedAt || new Date().toISOString() : null;
+  task.completedDate = task.done ? task.completedDate ||
+    (previousCompletion && Number.isFinite(previousCompletion.getTime()) ? toISODate(previousCompletion) : DB.meta.today) : null;
+  task.overdue = isTaskOverdue(task);
+  if ((task.done || task.blocked) && DB.runningTimer?.taskId === task.id) stopTaskTimer();
+}
+
+function milestoneTaskIds(projectId, milestone) {
+  return [...new Set([...(milestone.taskIds || []), ...allWorkbenchTasks()
+    .filter(task => milestone.id && task.project === projectId && task.milestoneId === milestone.id).map(task => task.id)])];
+}
+
+function projectMilestones(projectId) {
+  const project = projectById(projectId);
+  if (!project) return [];
+  return (detailForProject(project).milestones || []).filter(item => !(item.id === `milestone-${projectId}` &&
+    ['未安排', '待安排'].includes(item.name) && ['', '—', undefined].includes(item.date) &&
+    !item.note && !milestoneTaskIds(projectId, item).length));
+}
+
+function reconcileProjectWork(projectIds) {
+  for (const id of new Set(projectIds.filter(Boolean))) {
+    const project = projectById(id);
+    if (!project) continue;
+    const tasks = allWorkbenchTasks().filter(task => task.project === id);
+    DB.projectDetails[id] ||= detailForProject(project);
+    const milestones = projectMilestones(id);
+    for (const milestone of milestones) {
+      const ids = milestoneTaskIds(id, milestone);
+      if (!ids.length) continue;
+      const linked = ids.map(taskId => tasks.find(task => task.id === taskId));
+      milestone.progress = Math.round(linked.reduce((sum, task) => sum + (task ? taskWorkProgress(task) : 0), 0) / ids.length);
+      const done = linked.every(task => task?.done);
+      milestone.status = done ? 'done' : linked.some(task => task && (task.blocked || isTaskOverdue(task))) ? 'risk' : 'open';
+      milestone.completedAt = done ? milestone.completedAt || new Date().toISOString() : null;
+    }
+    project.open = tasks.filter(task => !task.done).length;
+    project.progressSource = tasks.length ? 'tasks' : 'milestones';
+    const values = tasks.length ? tasks.map(taskWorkProgress) : milestones.map(item => item.status === 'done' ? 100 : item.progress || 0);
+    const complete = values.length > 0 && tasks.every(task => task.done) && milestones.every(item => item.status === 'done');
+    project.progress = values.length ? Math.min(complete ? 100 : 99, Math.round(values.reduce((a, b) => a + b, 0) / values.length)) : 0;
+    project.status = complete ? '已完成' : tasks.some(task => task.done || task.blocked || task.status === '进行中' || taskWorkProgress(task) > 0) ||
+      milestones.some(item => item.status === 'done') ? '进行中' : '待开始';
+    project.completedAt = complete ? project.completedAt || new Date().toISOString() : null;
+    const next = milestones.find(item => item.status !== 'done');
+    const nextTask = tasks.find(task => !task.done);
+    project.next = next?.name || (complete ? '项目已完成' : nextTask?.title || '未安排');
+    project.nextDate = next?.date || (nextTask ? taskDeadlineDate(nextTask) || '—' : '—');
+    project.updated = '刚刚';
+    for (const doc of DB.documents || []) {
+      for (const draft of doc.analysis?.tasks || []) {
+        const task = tasks.find(item => item.id === draft.taskId);
+        if (task) Object.assign(draft, { done: !!task.done, status: task.status, progress: taskWorkProgress(task) });
+      }
+    }
+    for (const waiting of DB.waiting || []) {
+      const task = tasks.find(item => item.id === waiting.taskId);
+      if (task) waiting.status = task.done ? 'done' : 'open';
+    }
+  }
+  updateTaskCapacity();
+}
+
 function toggleTask(id) {
   if (!id) return;
   const task = [...DB.tasks.must, ...DB.tasks.should, ...DB.tasks.could,
     ...Object.values(DB.taskCalendar || {}).flat()].find(t => t.id === id);
   if (!task) return;
-  task.done = !task.done;
-  if (task.done && DB.runningTimer?.taskId === id) stopTaskTimer();
-  task.completedAt = task.done ? new Date().toISOString() : null;
-  updateTaskCapacity();
+  setWorkTaskStatus(task, task.done ? 'todo' : 'done');
+  reconcileProjectWork([task.project]);
   render();
   void persistWorkbench().catch(() => {});
 }
@@ -35,6 +110,7 @@ function addConfirmedTask(task, date, bucket) {
     DB.taskCalendar[date].push(task);
   }
   updateTaskCapacity();
+  if (projectById(task.project)?.progressSource) reconcileProjectWork([task.project]);
 }
 
 function readProjectStakeholders() {

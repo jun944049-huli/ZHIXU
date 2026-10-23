@@ -4,8 +4,8 @@ import '../../../prototype/styles.css';
 import '../../../prototype/refinements.css';
 
 const scripts = [
-  'data.js', 'storage.js', 'shared.js', 'views-core.js', 'views-chat.js',
-  'views-project.js', 'views-output.js', 'modals.js', 'operations.js', 'integrations.js',
+  'data.js', 'storage.js', 'shared.js', 'chat-format.js', 'views-core.js', 'views-chat.js',
+  'views-project.js', 'views-output.js', 'modals.js', 'operations.js', 'work-sync.js', 'integrations.js',
   'features.js', 'analytics.js', 'documents.js', 'workspace.js', 'plugins.js', 'app.js'
 ];
 

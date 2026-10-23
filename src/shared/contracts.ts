@@ -160,7 +160,17 @@ export const analyzeDocumentSchema = z.object({
 
 const optionalDate = z.union([z.iso.date(), z.literal('')]).default('');
 const projectReference = z.string().min(1).max(150).nullable().default(null);
+const workTaskStatus = z.enum(['todo', 'doing', 'blocked', 'done']);
 export const chatActionSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('work_update'), projectId: z.string().min(1).max(150),
+    requiresConfirmation: z.boolean().default(false),
+    tasks: z.array(z.object({ taskId: z.string().min(1).max(150), status: workTaskStatus,
+      progress: z.number().int().min(0).max(100).optional() })).max(150).default([]),
+    milestones: z.array(z.object({ milestoneId: z.string().min(1).max(150),
+      status: z.enum(['open', 'risk', 'done']),
+      taskIds: z.array(z.string().min(1).max(150)).min(1).max(150).optional()
+    })).max(100).default([])
+  }).refine(value => value.tasks.length + value.milestones.length > 0, '需要指定更新对象'),
   z.object({ type: z.literal('task'), projectId: projectReference, title: z.string().trim().min(1).max(200),
     due: optionalDate, date: optionalDate, assignee: z.string().max(100).default(''),
     estimateHours: z.number().min(0).max(200).default(0), priority: z.enum(['P0', 'P1', 'P2', 'P3', 'P4']).default('P2') }),
@@ -180,6 +190,12 @@ export const chatRequestSchema = z.object({
     today: z.iso.date(),
     selectedProjectId: projectReference,
     projects: z.array(z.object({ id: z.string().max(150), name: z.string().max(150) })).max(500),
+    tasks: z.array(z.object({ id: z.string().max(150), projectId: projectReference,
+      title: z.string().max(500), status: workTaskStatus,
+      progress: z.number().min(0).max(100) })).max(500).default([]),
+    milestones: z.array(z.object({ id: z.string().max(150), projectId: z.string().max(150),
+      name: z.string().max(500), status: z.enum(['open', 'risk', 'done']),
+      taskIds: z.array(z.string().max(150)).max(500).default([]) })).max(500).default([]),
     data: z.string().max(100000)
   })
 });
