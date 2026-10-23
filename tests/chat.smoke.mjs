@@ -96,7 +96,8 @@ async function assertComposerFixed() {
 }
 try {
   await launch();
-  await page.locator('[data-action="profile-settings"]').first().click();
+  await page.locator('[data-action="model-settings"]').first().click();
+  await page.locator('.provider-advanced summary').click();
   await page.locator('#custom-provider-name').fill('验收供应商');
   await page.locator('#custom-provider-base').fill(baseUrl);
   await page.locator('#custom-provider-key').fill(key);
@@ -104,8 +105,8 @@ try {
   await page.locator('#custom-provider-protocol').selectOption('responses');
   await page.locator('[data-action="save-profile"]').click();
   await page.waitForFunction(() => !document.getElementById('custom-provider-key'));
-  assert.match(await page.locator('#topbar-ai-pill').innerText(), /验收供应商.*semantic-model-a/s);
-  assert.equal(await page.locator('#sidebar-ai-name').innerText(), '验收供应商');
+  assert.equal(await page.evaluate(() => aiProviderConfig().name), '验收供应商');
+  assert.match(await page.locator('#topbar-ai-pill').innerText(), /semantic-model-a/);
   await page.locator('.nav [data-view="chat"]').click();
   await assertComposerFixed();
   assert.match(await page.locator('.chat-active-model').innerText(), /semantic-model-a/);
@@ -145,7 +146,8 @@ try {
   await page.waitForFunction(() => !state.chatSending);
   assert.equal(await page.evaluate(() => state.chatMessages.filter(m => m.role === 'user' && m.text === '失败后重试的问题。').length), 1);
   assert.equal(await page.locator('[data-action="chat-retry"]').count(), 0);
-  await page.locator('[data-action="profile-settings"]').first().click();
+  await page.locator('[data-action="model-settings"]').first().click();
+  await page.locator('.provider-advanced summary').click();
   await page.locator('#custom-provider-model').fill('semantic-model-b');
   await page.locator('[data-action="save-profile"]').click();
   await page.waitForFunction(() => !document.getElementById('custom-provider-key'));
@@ -161,7 +163,8 @@ try {
   await page.locator('[data-action="chat-send"]').click();
   for (let attempt = 0; attempt < 100 && !heldReply; attempt++) await page.waitForTimeout(50);
   assert.equal(typeof heldReply, 'function');
-  await page.locator('[data-action="profile-settings"]').first().click();
+  await page.locator('[data-action="model-settings"]').first().click();
+  await page.locator('.provider-advanced summary').click();
   await page.locator('#custom-provider-model').fill('semantic-model-a');
   await page.locator('[data-action="save-profile"]').click();
   await page.waitForFunction(() => !document.getElementById('custom-provider-key'));

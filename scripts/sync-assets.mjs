@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const destination = resolve('desktop-public');
@@ -8,3 +8,4 @@ for (const name of readdirSync(resolve('prototype'))) {
     copyFileSync(resolve('prototype', name), resolve(destination, name));
   }
 }
+cpSync(resolve('prototype/brand'), resolve(destination, 'brand'), { recursive: true });

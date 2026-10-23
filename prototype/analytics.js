@@ -71,8 +71,8 @@ function renderFactualProfile() {
   const days = Number(state.profileDays || 30);
   const stats = profileStatistics(days);
   const maximum = Math.max(1, ...stats.byDay.map(d => d.total));
-  return `<div class="page-head"><div><div class="eyebrow">Profile · 工作记录</div><h1>你的工作方式</h1>
-    <p class="sub">${stats.from} 至 ${DB.meta.today} · 根据本地任务与计时记录汇总</p></div>
+  return `<div class="page-head"><div><h1>回顾</h1>
+    <p class="sub">${stats.from} 至 ${DB.meta.today}</p></div>
     <label class="field">统计周期<select class="select" id="profile-period">
     ${[7, 30, 90].map(n => `<option value="${n}" ${days === n ? 'selected' : ''}>最近 ${n} 天</option>`).join('')}</select></label></div>
     <div class="stat-strip"><div class="stat"><div class="stat-label">安排任务</div><div class="stat-value">${stats.tasks.length}</div></div>
@@ -82,7 +82,7 @@ function renderFactualProfile() {
     <section class="feature-section"><h2>最近七天</h2><div class="activity-bars">
     ${stats.byDay.map(d => `<div class="activity-bar-item"><span>${d.done}/${d.total}</span><div class="activity-bar-track">
       <i style="height:${d.total / maximum * 100}%"><b style="height:${d.total ? d.done / d.total * 100 : 0}%"></b></i></div>
-      <span>${esc(d.date.slice(5))}</span></div>`).join('')}</div><p class="small muted">绿色为已完成，灰色为当天安排的任务总数。</p></section>
+      <span>${esc(d.date.slice(5))}</span></div>`).join('')}</div><div class="chart-legend"><span><i class="done"></i>已完成</span><span><i></i>已安排</span></div></section>
     <section class="feature-section"><div class="section-title-row"><h2>两周实验</h2>
       <button class="btn" data-action="record-edit" data-kind="experiment">${icon('plus', 13)} 新增实验</button></div>
       <div class="feature-list">${DB.experiments.map(e => `<div class="feature-list-row"><div><b>${esc(e.title)}</b>

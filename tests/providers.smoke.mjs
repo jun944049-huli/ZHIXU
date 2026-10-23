@@ -74,7 +74,8 @@ async function screenshot(name) {
 
 try {
   await launch();
-  await page.locator('[data-action="profile-settings"]').first().click();
+  await page.locator('[data-action="model-settings"]').first().click();
+  await page.locator('.provider-advanced summary').click();
   await page.locator('#custom-provider-base').fill(baseUrl);
   await page.locator('#custom-provider-key').fill(key);
   await page.waitForFunction(() => document.getElementById('custom-provider-model').value === 'text-model');

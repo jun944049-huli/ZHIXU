@@ -3,6 +3,7 @@ out/
 release/
 .desktop-test/
 desktop-public/
+.plugin-runtime/
 *.log
 .playwright-mcp/
 __pycache__/
@@ -15,3 +16,5 @@ __pycache__/
 *.db
 *.db-*
 reference-last-request.png
+design-review/*.png
+design-review/checks.json

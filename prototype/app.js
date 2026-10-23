@@ -27,9 +27,11 @@ function render() {
   topbar.innerHTML = renderTopbar();
   view.className = 'view view-enter' + (state.view === 'chat' ? ' view-chat' : '');
   view.innerHTML = renderView();
+  mountWorkspace();
+  mountPlugins();
   if (state.view === 'chat') window.scrollTo(0, 0);
 
-  const brand = assistantName();
+  const brand = appName();
   const titles = {
     today: '今日 · ' + brand,
     chat: '对话 · ' + brand,
@@ -37,8 +39,8 @@ function render() {
     projects: '项目 · ' + brand,
     project: '项目详情 · ' + brand,
     reports: '报表 · ' + brand,
-    profile: '画像 · ' + brand,
-    data: '数据与集成 · ' + brand
+    profile: '回顾 · ' + brand,
+    data: '连接与数据 · ' + brand
   };
   document.title = titles[state.view] || brand;
   scheduleWorkbenchSave();
@@ -74,6 +76,16 @@ function handleClick(e) {
   const el = e.target.closest('[data-action]');
   if (!el) return;
   const action = el.dataset.action;
+  if (action.startsWith('plugin-')) {
+    if (action === 'plugin-open') { state.dataTab = 'plugins'; render(); }
+    else if (action === 'plugin-manage') openPluginManager(el.dataset.id);
+    else void handlePluginAction(action);
+    return;
+  }
+  if (action.startsWith('workspace-')) {
+    void handleWorkspaceAction(action, el);
+    return;
+  }
 
   if (action === 'backdrop') {
     if (e.target === el) closeModal();
@@ -235,6 +247,26 @@ function handleClick(e) {
     case 'profile-settings':
       openProfileSettings();
       break;
+    case 'model-settings':
+      openProfileSettings('models');
+      break;
+    case 'settings-tab':
+      switchSettingsTab(el.dataset.tab);
+      break;
+    case 'chat-details':
+      state.chatDetails = !state.chatDetails;
+      workspaceState.open = false;
+      render();
+      scrollChatToBottom();
+      break;
+    case 'project-display':
+      state.projectDisplay = el.dataset.mode === 'list' ? 'list' : 'grid';
+      render();
+      break;
+    case 'data-tab':
+      state.dataTab = ['connections', 'plugins', 'workflow', 'storage'].includes(el.dataset.tab) ? el.dataset.tab : 'connections';
+      render();
+      break;
     case 'save-profile':
       saveProfile();
       break;
@@ -249,6 +281,9 @@ function handleClick(e) {
       break;
     case 'avatar-color':
       setAvatarColor(el.dataset.color);
+      break;
+    case 'profile-photo-remove':
+      removeProfilePhoto();
       break;
     case 'parse-workflow':
       parseWorkflow();
@@ -339,6 +374,7 @@ function handleClick(e) {
 
 function handleInput(e) {
   if (e.target.id === 'chat-input') state.chatDraft = e.target.value;
+  if (e.target.id === 'workflow-input') state.workflowDraft = e.target.value;
   if (e.target.id === 'command-input') {
     filterCommand(e.target.value);
   }
@@ -356,9 +392,7 @@ function handleInput(e) {
   }
 
   if (e.target.id === 'profile-initials') {
-    const av = document.getElementById('profile-avatar');
-    const name = document.getElementById('profile-name');
-    if (av) av.textContent = e.target.value.trim() || deriveInitials(name ? name.value : '');
+    refreshProfileAvatar();
   }
 
   if (e.target.id === 'polish-original') {
@@ -375,6 +409,13 @@ function handleInput(e) {
 }
 
 function handleKeydown(e) {
+  if (e.target.matches('[data-action="settings-tab"]') && ['ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    e.preventDefault();
+    const tab = e.target.dataset.tab === 'general' ? 'models' : 'general';
+    switchSettingsTab(tab);
+    document.getElementById('settings-tab-' + tab).focus();
+    return;
+  }
   const mod = e.ctrlKey || e.metaKey;
 
   if (mod && e.key.toLowerCase() === 'k') {
@@ -421,6 +462,7 @@ function handleKeydown(e) {
 }
 
 function handleChange(e) {
+  if (e.target.id === 'profile-photo') { void importProfilePhoto(e.target); return; }
   if (e.target.id === 'text-file') {
     state.documentImportResults = new Map();
     const results = document.getElementById('document-import-results');
@@ -505,7 +547,7 @@ function loadLocalOverrides() {
     const settings = JSON.parse(storageGet('jw-settings') || 'null');
     if (settings && typeof settings === 'object') {
       DB.settings = Object.assign({}, DB.settings, settings);
-      DB.settings.assistantName = String(DB.settings.assistantName || '').trim().slice(0, 12) || '小鱼';
+      DB.settings.assistantName = String(DB.settings.assistantName || '').trim().slice(0, 12) || '知序';
     }
     const workflow = JSON.parse(storageGet('jw-workflow') || 'null');
     if (workflow && workflow.text) Object.assign(DB.workflow, workflow);
@@ -545,6 +587,8 @@ async function boot() {
   updateTaskCapacity();
   try {
     const params = new URLSearchParams(location.search);
+    const view = params.get('view');
+    if (['today', 'chat', 'inbox', 'projects', 'reports', 'profile', 'data'].includes(view)) state.view = view;
     const report = params.get('report');
     if (report && ['daily', 'weekly', 'monthly', 'project', 'risk', 'requirements'].includes(report)) {
       state.view = 'reports';
@@ -563,9 +607,6 @@ async function boot() {
     if (event.target.id === 'report-share-link') event.target.select();
   });
 
-  setTimeout(() => {
-    if (!window.xiaoyuDesktop) showToast('工作数据已启用本地保存');
-  }, 900);
 }
 
 boot();

@@ -57,6 +57,9 @@ try {
   let page = await application.firstWindow();
   page.on('pageerror', error => errors.push(error.message));
   await page.waitForFunction(() => document.querySelectorAll('.task-row').length > 0);
+  assert.match(await page.title(), /知序/);
+  assert.equal(await page.locator('.brand-name').innerText(), '知序');
+  assert.ok(await page.locator('.brand-image').first().evaluate(image => image.complete && image.naturalWidth > 0));
   assert.equal(await page.evaluate(() => typeof window.xiaoyuDesktop?.save), 'function');
   await page.locator('[data-action="capture"]').first().click();
   await page.locator('#capture-text').fill('星火项目：桌面端持久化验收任务，预计 1 小时，今天完成。');
@@ -106,6 +109,7 @@ try {
   const projectId = await page.evaluate(() => state.projectId);
   await page.locator('[data-action="edit-project"]').click();
   await page.locator('#project-name').fill('桌面项目验收已编辑');
+  await page.locator('.project-advanced summary').click();
   await page.locator('#project-progress').fill('0');
   await page.locator('[data-action="save-project"]').click();
   await page.waitForFunction(() => document.querySelector('#view h1')?.textContent === '桌面项目验收已编辑');
@@ -127,6 +131,7 @@ try {
   await page.locator('[data-action="confirm-delete-project"]').click();
   await page.waitForFunction(id => !projectById(id), projectId);
   assert.equal(await page.evaluate(() => DB.tasks.must.find(t => t.title === '项目关联验收任务').project), null);
+  await page.locator('[data-action="project-display"][data-mode="list"]').click();
   await page.locator('[data-project-row="p1"] [data-action="delete-project"]').click();
   await page.locator('[data-action="confirm-delete-project"]').click();
   await page.waitForFunction(() => !projectById('p1'));

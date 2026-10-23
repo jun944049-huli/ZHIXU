@@ -49,39 +49,38 @@ function renderProjects() {
   return `
     <div class="page-head">
       <div>
-        <div class="eyebrow">Portfolio · 项目组合</div>
         <h1>项目</h1>
         <p class="sub">${DB.projects.length} 个项目，${attention} 个需要关注。</p>
       </div>
       <div class="head-actions">
-        <button class="btn" data-action="project-export">${icon('download', 14)} 导出台账</button>
+        <div class="segmented" role="group" aria-label="项目视图">
+          <button class="icon-btn" data-action="project-display" data-mode="grid" aria-pressed="${state.projectDisplay !== 'list'}" title="卡片视图" aria-label="卡片视图">${icon('layout', 16)}</button>
+          <button class="icon-btn" data-action="project-display" data-mode="list" aria-pressed="${state.projectDisplay === 'list'}" title="列表视图" aria-label="列表视图">${icon('table', 16)}</button>
+        </div>
+        <button class="icon-btn" data-action="project-export" title="导出项目" aria-label="导出项目">${icon('download', 17)}</button>
         <button class="btn btn-primary" data-action="new-project">${icon('plus', 14)} 新建项目</button>
       </div>
     </div>
 
-    <div class="card stat-strip">
+    <div class="stat-strip">
       ${stats.map(s => `
         <div class="stat">
           <div class="stat-label">${s.label}</div>
           <div class="stat-value">${s.value}</div>
-          <div class="stat-foot">${s.foot}</div>
         </div>
       `).join('')}
     </div>
 
-    <div class="project-grid">${cards || '<p class="muted">暂无项目</p>'}</div>
+    ${state.projectDisplay !== 'list' ? `<div class="project-grid">${cards || '<p class="quiet-empty">暂无项目</p>'}</div>` : ''}
 
-    <div class="project-register">
-      <div class="panel-head">
-        <h3>${icon('table', 15)} 项目台账</h3>
-      </div>
+    ${state.projectDisplay === 'list' ? `<div class="project-register">
       <div class="table-scroll">
         <table class="task-table">
           <thead><tr><th>项目</th><th>负责人</th><th>下一节点</th><th>未完成任务</th><th>操作</th></tr></thead>
           <tbody>${rows || '<tr><td colspan="5" class="muted">暂无项目</td></tr>'}</tbody>
         </table>
       </div>
-    </div>
+    </div>` : ''}
   `;
 }
 
@@ -135,7 +134,7 @@ function renderProject() {
   const detail = detailForProject(p);
   const liveTasks = allWorkbenchTasks().filter(t => t.project === p.id);
   const projectTasks = liveTasks.map(t => ({
-    ...t, status: t.done ? '已完成' : t.blocked ? '阻塞' : t.status === '进行中' ? '进行中' : '待开始'
+    ...t, status: t.done ? '已完成' : t.blocked ? '阻塞' : isTaskOverdue(t) ? '逾期' : t.status === '进行中' ? '进行中' : '待开始'
   }));
   const tab = state.projectTab;
   const notes = projectNotesFor(p.id);

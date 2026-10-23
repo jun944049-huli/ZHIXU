@@ -43,6 +43,7 @@ try {
     await page.locator('.integration-modal [data-action="close-modal"]').click();
   }
   await page.locator('[data-action="nav"][data-view="projects"]').first().click();
+  await page.locator('[data-action="project-display"][data-mode="list"]').click();
   await page.locator('.project-register').scrollIntoViewIfNeeded();
   await finishAnimations();
   await page.screenshot({ path: resolve(evidence, 'browser-project-register.png') });
@@ -174,7 +175,7 @@ try {
         suggestion: '检查当前密钥的模型授权和网关限制，输入内容已保留。' })
     };
   });
-  await page.locator('[data-action="profile-settings"]').first().click();
+  await page.locator('[data-action="model-settings"]').first().click();
   await page.locator('#custom-provider-base').fill('http://127.0.0.1:12345');
   await page.locator('#custom-provider-key').fill('layout-test-only');
   await page.waitForFunction(() => document.getElementById('custom-provider-model').value.includes('text-model'));
@@ -229,7 +230,7 @@ try {
   });
   const chatLayouts = [];
   assert.equal(await page.locator('.chat-safety').count(), 0);
-  assert.equal(await page.locator('.chat-rail > .card').count(), 2);
+  assert.equal(await page.locator('.chat-rail').count(), 0);
   for (const viewport of [{ width: 1920, height: 1080 }, { width: 1440, height: 900 },
     { width: 1280, height: 720 }, { width: 390, height: 844 },
     { width: 390, height: 600 }, { width: 844, height: 390 }]) {

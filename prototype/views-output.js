@@ -205,18 +205,16 @@ function renderReports() {
   return `
     <div class="page-head">
       <div>
-        <div class="eyebrow">Reports · 事实驱动</div>
-        <h1>报表</h1>
-        <p class="sub">根据本地任务、项目和风险记录汇总。</p>
+        <h1>报告</h1>
       </div>
       <div class="head-actions">
-        <button class="btn" data-action="report-copy">${icon('message', 14)} 复制 IM 版本</button>
+        <button class="btn" data-action="report-copy">${icon('copy', 14)} 复制</button>
         <button class="btn btn-primary" data-action="report-regenerate">${icon('refresh', 14)} 重新生成</button>
       </div>
     </div>
 
     <div class="reports-layout">
-      <aside class="card template-list">
+      <aside class="template-list">
         <div class="template-head">
           <div class="eyebrow">模板</div>
         </div>
@@ -255,7 +253,6 @@ function renderReports() {
         </div>
 
         <article class="report-sheet">
-          <div class="eyebrow">${esc(eyebrow)}</div>
           <h1>${esc(r.title)}</h1>
           <div class="report-meta">
             <span>${esc(r.period)}</span>
@@ -276,32 +273,6 @@ function renderReports() {
         </article>
       </div>
 
-      <aside class="report-rail">
-        <div class="card">
-          <div class="rail-section-title">汇总方式</div>
-          <p class="small muted">本地记录汇总；人工编辑后可保存快照。</p>
-        </div>
-
-        <div class="card">
-          <div class="rail-section-title">生成设置</div>
-          <div class="setting-row"><span>周期</span><span class="val">${esc(r.period)}</span></div>
-          <div class="setting-row"><span>来源记录</span><span class="val">${r.facts}</span></div>
-          <div class="setting-row"><span>云端分享</span><span class="val">尚未接入</span></div>
-        </div>
-
-        <div class="card">
-          <div class="rail-section-title">事实完整性</div>
-          <div class="fact-integrity">
-            ${icon('shield', 14)}
-            <div><strong>${r.edited ? '包含人工编辑内容' : '根据已保存记录汇总'}</strong><br>${r.edited ? '编辑内容需自行核对。' : '示例项目仍属于本机记录，可编辑或删除。'}</div>
-          </div>
-          <div class="fact-list">
-            <span><i></i>本机任务 ${allWorkbenchTasks().length} 条</span>
-            <span><i></i>项目 ${DB.projects.length} 个</span>
-          </div>
-        </div>
-
-      </aside>
     </div>
   `;
 }
@@ -375,15 +346,14 @@ function renderProfile() {
 function renderData() {
   const connectorGroups = [
     { id: 'content', title: '内容与沟通', icon: 'message', sub: '聊天、邮件、会议里的承诺，先进收件箱。' },
-    { id: 'work', title: '工作系统', icon: 'layout', sub: '项目、表格、代码库里的任务与状态。' },
-    { id: 'plugin', title: '插件与扩展', icon: 'zap', sub: '把捕获入口放到你已经在用的地方。' }
+    { id: 'work', title: '工作系统', icon: 'layout', sub: '项目、表格、代码库里的任务与状态。' }
   ];
 
   const connectorCard = c => {
     const status = integrationStatus(c.id);
     return `
     <button class="connector-card" data-action="connector-config" data-id="${c.id}" aria-label="${esc(c.name)}连接配置"
-      ${!INTEGRATIONS[c.id] && c.id !== 'manual' ? 'disabled title="此连接器尚未接入"' : ''}>
+      ${!INTEGRATIONS[c.id] ? 'disabled title="此连接器尚未接入"' : ''}>
       <div class="connector-top">
         <span class="connector-mark" style="background:${c.color}">${esc(c.mark)}</span>
         <div>
@@ -394,20 +364,20 @@ function renderData() {
       </div>
       <div class="connector-foot">
         <span>${esc(status.label)}</span>
-        <span class="link">${c.id === 'manual' ? '打开' : INTEGRATIONS[c.id] ? '配置' : '待开发'}</span>
+        <span class="link">${INTEGRATIONS[c.id] ? '配置' : '待开发'}</span>
       </div>
     </button>
   `; };
 
   const connectorSections = connectorGroups.map(g => {
-    const items = DB.connectors.filter(c => c.group === g.id);
+    const items = DB.connectors.filter(c => c.group === g.id && INTEGRATIONS[c.id]);
+    if (!items.length) return '';
     const connected = items.filter(c => integrationStatus(c.id).on).length;
     return `
       <div class="connector-section">
         <div class="connector-section-head">
           <div>
             <h3>${icon(g.icon, 14)} ${g.title}</h3>
-            <p>${g.sub}</p>
           </div>
           <span class="tiny muted">${connected} / ${items.length} 已验证或可用</span>
         </div>
@@ -438,20 +408,21 @@ function renderData() {
   return `
     <div class="page-head">
       <div>
-        <div class="eyebrow">Data · 可扩展的数据层</div>
-        <h1>数据与集成</h1>
-        <p class="sub">管理外部来源、连接配置与手动同步记录。</p>
+        <h1>连接与数据</h1>
       </div>
       <div class="head-actions">
-        <span class="data-head-badge">${icon('shield', 12)} 本地存储</span>
-        <button class="btn btn-primary" data-action="connector-add">${icon('plus', 14)} 配置连接器</button>
+        ${state.dataTab === 'connections' ? `<button class="btn btn-primary" data-action="connector-add">${icon('plus', 14)} 添加连接</button>` : ''}
       </div>
     </div>
 
+    <div class="view-tabs" role="group" aria-label="连接与数据分类">
+      ${[['connections', '连接'], ['plugins', '插件'], ['workflow', '工作约定'], ['storage', '字段与备份']].map(([id, label]) =>
+        `<button data-action="data-tab" data-tab="${id}" aria-pressed="${state.dataTab === id}">${label}</button>`).join('')}
+    </div>
+    <section class="data-pane" ${state.dataTab !== 'connections' ? 'hidden' : ''}>
     <div class="section-title-row" style="margin-top:0">
       <div>
         <h2>连接器</h2>
-        <p class="sub">${DB.connectors.filter(c => integrationStatus(c.id).on).length} 个已验证或可用 · ${Object.keys(INTEGRATIONS).length} 类可配置。外部记录同步后进入收件箱。</p>
       </div>
       <div class="actions">
         <button class="btn btn-sm btn-ghost" data-action="connector-logs">${icon('refresh', 12)} 同步日志</button>
@@ -459,21 +430,24 @@ function renderData() {
     </div>
 
     ${connectorSections}
-
+    <div class="section-title-row plugin-entry"><h2>${icon('zap', 16)} 插件与扩展</h2>
+      <button class="btn btn-sm" data-action="plugin-open">${icon('plus', 14)} 管理插件</button></div>
+    </section>
+    <section class="data-pane" ${state.dataTab !== 'plugins' ? 'hidden' : ''}>${renderPlugins()}</section>
+    <section class="data-pane" ${state.dataTab !== 'workflow' ? 'hidden' : ''}>
     <div class="section-title-row">
       <div>
-        <h2>我的工作流</h2>
-        <p class="sub">记录工作约定并提取规则草稿，自动执行尚未接入。</p>
+        <h2>工作约定</h2>
+        <p class="sub">保存后供模型对话参考。</p>
       </div>
       <span class="chip green" id="workflow-version">v${workflow.version} · ${workflow.updated}</span>
     </div>
 
-    <div class="card workflow-card">
+    <div class="workflow-card">
       <div class="workflow-grid">
         <div class="workflow-editor">
-          <div class="wf-label">${icon('edit', 13)} 你怎么工作？</div>
-          <textarea id="workflow-input" class="workflow-input" placeholder="例如：老板在飞书派活时，先判断是不是星火项目；今天排不下，先给我看会挤掉什么……">${esc(workflow.text)}</textarea>
-          <div class="workflow-hint">自然语言即可。建议包含：触发条件、归属规则、截止口径、冲突处理、提醒时间。</div>
+          <div class="wf-label">${icon('edit', 13)} 偏好与约定</div>
+          <textarea id="workflow-input" class="workflow-input" placeholder="例如：安排新任务前先检查今天的空闲时间。">${esc(state.workflowDraft ?? workflow.text)}</textarea>
           <div class="workflow-actions">
             <button class="btn btn-primary btn-sm" data-action="parse-workflow">${icon('sparkles', 12)} 提取规则草稿</button>
             <button class="btn btn-sm" data-action="workflow-template" data-template="boss">老板派活</button>
@@ -488,41 +462,21 @@ function renderData() {
             <span class="chip green">${workflow.rules.length} 条</span>
           </div>
           <div class="workflow-rules" id="workflow-rules">${workflowRules}</div>
-          <div class="workflow-rules-foot">${icon('shield', 11)} 仅保存规划；不会启动外部监听或定时提醒</div>
+          <div class="workflow-rules-foot">供对话参考，不自动执行。</div>
         </div>
       </div>
     </div>
 
-    <div class="card mt-16">
-      <div class="panel-head">
-        <h3>${icon('route', 15)} 数据如何流动</h3>
-        <span class="chip green">原始数据保存在本机</span>
-      </div>
-      <div class="panel-body">
-        <div class="pipeline">
-          <span class="pipe-node"><b>来源</b><small>飞书 / 邮件 / ICS</small></span>
-          ${icon('arrowRight', 14)}
-          <span class="pipe-node"><b>原始数据</b><small>source_item</small></span>
-          ${icon('arrowRight', 14)}
-          <span class="pipe-node"><b>字段映射</b><small>可配置</small></span>
-          ${icon('arrowRight', 14)}
-          <span class="pipe-node"><b>任务 / 项目</b><small>核心实体</small></span>
-          ${icon('arrowRight', 14)}
-          <span class="pipe-node"><b>指标 / 报告</b><small>可下钻</small></span>
-        </div>
-        <p class="small muted mt-12">同一条数据可以同时进入多个视图：今天、项目、周报、画像。删除实体不会删除原始数据，反之亦然。</p>
-      </div>
-    </div>
-
+    </section>
+    <section class="data-pane" ${state.dataTab !== 'storage' ? 'hidden' : ''}>
     <div class="section-title-row">
       <div>
-        <h2>自定义数据模型</h2>
-        <p class="sub">管理字段定义；任务、项目和风险可在编辑时填写自定义字段。</p>
+        <h2>自定义字段</h2>
       </div>
       <button class="btn btn-sm" data-action="record-edit" data-kind="field">${icon('plus', 12)} 新增字段</button>
     </div>
 
-    <div class="card">
+    <div class="fields-section">
       <div class="fields-tabs">
         ${fieldTabs.map(t => `<button class="fields-tab ${state.fieldsTab === t.id ? 'active' : ''}" data-action="fields-tab" data-tab="${t.id}">${t.label}</button>`).join('')}
       </div>
@@ -544,8 +498,7 @@ function renderData() {
 
     <div class="section-title-row">
       <div>
-        <h2>数据健康</h2>
-        <p class="sub">本地优先，但备份和可迁移性不能省。</p>
+        <h2>备份与导出</h2>
       </div>
       <div class="actions">
         <button class="btn btn-sm" data-action="data-backup">${icon('shield', 12)} 立即备份</button>
@@ -553,7 +506,7 @@ function renderData() {
       </div>
     </div>
 
-    <div class="card data-health">
+    <div class="data-health">
       <div class="dh-cell">
         <div class="dh-label">记录</div>
         <div class="dh-value">${allWorkbenchTasks().length + DB.projects.length + DB.inbox.length} <small>条</small></div>
@@ -576,14 +529,7 @@ function renderData() {
       </div>
     </div>
 
-    <div class="card mt-16">
-      <div class="panel-head"><h3>${icon('lock', 15)} 本地数据与模型</h3></div>
-      <div class="panel-body">
-        <div class="setting-row"><span>润色供应商</span><span class="val">${esc(aiProviderName())}</span></div>
-        <div class="setting-row"><span>工作数据导出</span><span class="val">不含连接凭据和供应商设置</span></div>
-        <div class="setting-row"><span>桌面数据库备份</span><span class="val">凭据保持系统加密</span></div>
-        <div class="setting-row"><span>自动脱敏 / 云端同步</span><span class="val">尚未接入</span></div>
-      </div>
-    </div>
+    <p class="small muted mt-16">工作数据导出不含密钥。完整迁移请同时备份原附件。</p>
+    </section>
   `;
 }

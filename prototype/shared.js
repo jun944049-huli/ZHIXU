@@ -10,6 +10,9 @@ const state = {
   todayMenu: false,
   projectId: 'p1',
   projectTab: 'overview',
+  projectDisplay: 'grid',
+  dataTab: 'connections',
+  chatDetails: false,
   report: 'weekly',
   reportDate: DB.meta.today,
   inboxId: 'i1',
@@ -110,8 +113,47 @@ function allWorkbenchTasks() {
     ...Object.values(DB.taskCalendar || {}).flat()];
 }
 
+function taskDeadlineDate(task, reference = task.scheduledDate || DB.meta.today) {
+  const due = String(task.due || '').trim();
+  const iso = due.match(/^(\d{4}-\d{2}-\d{2})(?:$|[ T])/);
+  if (iso) return toISODate(parseISODate(iso[1])) === iso[1] ? iso[1] : null;
+  const short = due.match(/^(\d{1,2})\/(\d{1,2})(?:$|\s)/);
+  if (short) {
+    const value = `${reference.slice(0, 4)}-${short[1].padStart(2, '0')}-${short[2].padStart(2, '0')}`;
+    return toISODate(parseISODate(value)) === value ? value : null;
+  }
+  const relative = due.match(/^(昨天|今天|今日|明天)/);
+  if (relative) return addDaysISO(reference, relative[1] === '昨天' ? -1 : relative[1] === '明天' ? 1 : 0);
+  return task.deadlineDate || null;
+}
+
+function isTaskOverdue(task) {
+  const deadline = taskDeadlineDate(task);
+  return !task.done && Boolean(deadline && deadline < DB.meta.today);
+}
+
+function overdueTasks() {
+  return [...new Map(allWorkbenchTasks().filter(isTaskOverdue).map(task => [task.id, task])).values()]
+    .map(task => ({ ...task, days: Math.max(1, Math.round(
+      (parseISODate(DB.meta.today) - parseISODate(taskDeadlineDate(task))) / 86400000)) }));
+}
+
 function assistantName() {
-  return (DB.settings && String(DB.settings.assistantName || '').trim()) || '小鱼';
+  const name = DB.settings && String(DB.settings.assistantName || '').trim();
+  return !name || name === '小鱼' ? '知序' : name;
+}
+
+function appName() { return '知序'; }
+
+function brandImage(className = '') {
+  return `<img class="brand-image ${className}" src="brand/zhixu-c.svg" width="32" height="32" alt="知序">`;
+}
+
+function profileAvatarContent(user = DB.user) {
+  const image = String(user.avatarImage || '');
+  return image.length <= 180000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(image)
+    ? `<img src="${image}" alt="" width="192" height="192">`
+    : esc(user.initials || (user.name || '我').slice(0, 1));
 }
 
 function deepseekKey() {
@@ -180,7 +222,8 @@ function refreshAIProviderUI() {
   if (pulse) pulse.className = 'pulse' + (cfg.id === 'local' ? ' off' : '');
   const pill = document.getElementById('topbar-ai-pill');
   if (pill) {
-    pill.innerHTML = `<span class="dot ${cfg.id === 'local' ? 'off' : ''}"></span><strong>${esc(cfg.name)}</strong><span>${cfg.id === 'local' ? '未配置 · 本地规则' : '已配置 · ' + esc(cfg.model)}</span>`;
+    pill.innerHTML = `<span class="dot ${cfg.id === 'local' ? 'off' : ''}"></span><strong>${esc(cfg.name)}</strong><span>${cfg.id === 'local' ? '连接模型' : esc(cfg.model)}</span>`;
+    pill.title = cfg.id === 'local' ? '连接模型' : cfg.name + ' · ' + cfg.model;
   }
 }
 

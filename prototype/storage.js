@@ -27,8 +27,8 @@ function workbenchSnapshot() {
 function updateStorageStatus(saved) {
   const label = document.getElementById('workspace-storage-status');
   if (label) label.textContent = saved
-    ? window.xiaoyuDesktop ? '本地 · SQLite 已保存' : '本地 · 已保存'
-    : '本地 · 保存失败';
+    ? '已保存'
+    : '保存失败';
 }
 
 function persistWorkbench() {

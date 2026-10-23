@@ -10,17 +10,19 @@ function workbench() {
   const saved: unknown[] = [];
   const preferences: Record<string, string> = {};
   const context = createContext({
-    crypto: webcrypto, console, setTimeout, clearTimeout,
+    crypto: webcrypto, console, setTimeout, clearTimeout, Blob,
+    workbenchSnapshot: () => ({ db: {}, preferences: {} }),
     window: {},
     storageGet: () => null,
     storageSet: (key: string, value: string) => { preferences[key] = value; },
-    document: { getElementById: (id: string) => fields[id] || null, querySelector: () => null },
+    document: { getElementById: (id: string) => fields[id] || null, querySelector: () => null,
+      addEventListener: () => {} },
     render: () => {}, closeModal: () => {}, showToast: () => {},
     scrollChatToBottom: () => {},
     persistWorkbench: async () => { saved.push(runInContext('JSON.stringify(DB)', context)); }
   });
   for (const file of ['data.js', 'shared.js', 'views-chat.js', 'views-project.js', 'views-output.js',
-    'operations.js', 'integrations.js', 'features.js', 'analytics.js', 'documents.js']) {
+    'operations.js', 'integrations.js', 'features.js', 'analytics.js', 'documents.js', 'workspace.js', 'plugins.js']) {
     runInContext(readFileSync(resolve('prototype', file), 'utf8'), context, { filename: file });
   }
   runInContext('initializeIntegrations(); initializeFeatures();', context);
@@ -29,6 +31,74 @@ function workbench() {
     fields, saved, preferences
   };
 }
+
+test('overdue migration preserves independent projects, completed tasks and task identity across reloads', () => {
+  const w = workbench();
+  w.run(`DB.tasks={must:[],should:[],could:[]}; DB.taskCalendar={};
+    addConfirmedTask({id:'same-a',title:'相同标题',project:'p1',done:true,due:'2030-01-01'},DB.meta.today,'should');
+    DB.overdue=[{id:'old-a',title:'相同标题',project:'p1',days:2},
+      {id:'old-b',title:'相同标题',project:'p2',days:3}];
+    migrateOverdueTasks();`);
+  assert.equal(w.run('allWorkbenchTasks().length'), 2);
+  assert.equal(w.run('overdueTasks().length'), 1);
+  assert.equal(w.run('overdueTasks()[0].id'), 'old-b');
+  w.run('initializeFeatures(); initializeFeatures()');
+  assert.equal(w.run('allWorkbenchTasks().length'), 2);
+  assert.equal(w.run('DB.overdue.length'), 0);
+});
+
+test('saving overdue edits, rescheduling and completing one task update only its reminder', async () => {
+  const w = workbench();
+  w.run(`DB.tasks={must:[],should:[],could:[]}; DB.taskCalendar={};
+    for (const id of ['a','b']) addConfirmedTask({id,title:'同名任务',project:id==='a'?'p1':'p2',
+      due:addDaysISO(DB.meta.today,-2),overdue:true,priority:'P2',estimate:'1h'},DB.meta.today,'should');
+    state.editTaskId='a';`);
+  const today = w.run('DB.meta.today');
+  const yesterday = w.run('addDaysISO(DB.meta.today,-2)');
+  for (const [key, value] of Object.entries({
+    title: '更新后的清单', project: 'p1', date: today, due: yesterday, hours: '1',
+    priority: 'P2', status: 'doing', assignee: 'QA', note: '补充清单'
+  })) w.fields['task-' + key] = { value, checkValidity: () => true };
+  await w.run('saveTaskEditor()');
+  assert.equal(w.run('overdueTasks().length'), 2);
+  assert.equal(w.run("overdueTasks().find(t=>t.id==='a').title"), '更新后的清单');
+  w.fields['task-due'].value = w.run('addDaysISO(DB.meta.today,2)');
+  await w.run('saveTaskEditor()');
+  assert.equal(w.run('overdueTasks().length'), 1);
+  assert.equal(w.run("taskLocation('a').task.overdue"), false);
+  await w.run("handleFeatureAction('overdue-plan',{dataset:{id:'b'}})");
+  assert.equal(w.run('overdueTasks().length'), 0);
+  assert.equal(w.run('allWorkbenchTasks().length'), 2);
+  w.run("taskLocation('a').task.due=addDaysISO(DB.meta.today,-1); taskLocation('b').task.due=addDaysISO(DB.meta.today,-1)");
+  w.run("toggleTask('a')");
+  assert.equal(w.run('overdueTasks().length'), 1);
+  assert.equal(w.run('overdueTasks()[0].id'), 'b');
+  w.run("toggleTask('a')");
+  assert.equal(w.run('overdueTasks().length'), 2);
+  w.fields['task-due'].value = w.run("taskLocation('a').task.due");
+  w.fields['task-date'].value = w.run('addDaysISO(DB.meta.today,3)');
+  await w.run('saveTaskEditor()');
+  assert.equal(w.run('overdueTasks().length'), 1);
+  assert.equal(w.run("taskDeadlineDate(taskLocation('a').task)"), w.fields['task-date'].value);
+  w.run("initializeFeatures()");
+  assert.equal(w.run('overdueTasks().length'), 1);
+});
+
+test('relative deadlines stay anchored across day rollover and invalid task dates cannot move records', async () => {
+  const w = workbench();
+  w.run(`DB.tasks={must:[],should:[],could:[]}; DB.taskCalendar={};
+    addConfirmedTask({id:'relative',title:'相对日期',due:'昨天 18:00',overdue:true},DB.meta.today,'should');
+    migrateOverdueTasks();`);
+  const deadline = w.run("taskDeadlineDate(taskLocation('relative').task)");
+  w.run('DB.meta.today=addDaysISO(DB.meta.today,1); migrateOverdueTasks()');
+  assert.equal(w.run("taskDeadlineDate(taskLocation('relative').task)"), deadline);
+  assert.equal(w.run('overdueTasks()[0].days'), 2);
+  w.run("state.editTaskId='relative'");
+  for (const [key, value] of Object.entries({ title:'无效日期',date:'2026-02-30',hours:'1' }))
+    w.fields['task-' + key] = { value, checkValidity: () => true };
+  await w.run('saveTaskEditor()');
+  assert.equal(w.run("taskLocation('relative').task.title"), '相对日期');
+});
 
 test('project removal preserves linked tasks across all dates and archives notes', async () => {
   const w = workbench();
@@ -215,8 +285,11 @@ test('old prototype connections do not appear as verified without saved credenti
   w.run('initializeIntegrations()');
   assert.equal(w.run("integrationStatus('feishu').on"), false);
   assert.equal(w.run("integrationStatus('ics').label"), '未配置');
-  assert.equal(w.run("integrationStatus('manual').on"), true);
+  assert.equal(w.run("integrationStatus('manual').on"), false);
   assert.equal(w.run("integrationStatus('github').label"), '尚未接入');
+  assert.doesNotMatch(w.run('renderData()'), /data-id="manual"/);
+  w.run("openCapture=()=>{throw Error('wrong route')}; openIntegration('manual')");
+  assert.equal(w.run('state.dataTab'), 'plugins');
 });
 
 test('connector imports deduplicate pending and already-confirmed inbox records', () => {

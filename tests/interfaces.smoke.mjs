@@ -11,9 +11,10 @@ mkdirSync(evidence, { recursive: true });
 const profile = mkdtempSync(join(evidence, 'interface-profile-'));
 const exported = mkdtempSync(join(evidence, 'interface-exports-'));
 const { ELECTRON_RUN_AS_NODE, ...environment } = process.env;
-const source = ['app.js', 'features.js'].map(name => readFileSync(join(root, 'prototype', name), 'utf8')).join('\n');
+const source = ['app.js', 'features.js', 'workspace.js', 'plugins.js'].map(name => readFileSync(join(root, 'prototype', name), 'utf8')).join('\n');
 const knownActions = new Set([...source.matchAll(/case '([^']+)'/g)].map(match => match[1]));
 knownActions.add('backdrop');
+['plugin-open', 'plugin-add', 'plugin-refresh', 'plugin-manage', 'plugin-remove-confirm', 'plugin-remove-cancel'].forEach(action => knownActions.add(action));
 const observed = new Set();
 const errors = [];
 const captureScreenshots = process.env.XIAOYU_SKIP_SCREENSHOTS !== '1';
@@ -205,6 +206,7 @@ try {
   await page.waitForFunction(() => DB.experiments.some(e => e.title === '核查两周实验'));
 
   await nav('data');
+  await page.locator('[data-action="data-tab"][data-tab="storage"]').click();
   await page.locator('[data-action="record-edit"][data-kind="field"]').first().click();
   await page.locator('#record-title').fill('核查扩展字段');
   await page.locator('#record-type').selectOption('单选');
@@ -212,6 +214,7 @@ try {
   await page.locator('[data-action="record-save"]').click();
   await page.waitForFunction(() => DB.fields.task.some(f => f.name === '核查扩展字段'));
   await nav('today');
+  await page.evaluate(id => setTodayDate(taskLocation(id).date), taskId);
   await page.locator('.task-row [data-action="task-edit"]').first().click();
   const customFieldId = await page.evaluate(() => DB.fields.task.find(f => f.name === '核查扩展字段').id);
   await page.locator('#custom-' + customFieldId).selectOption('已确认');

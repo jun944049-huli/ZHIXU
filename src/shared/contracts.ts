@@ -61,6 +61,36 @@ export interface DesktopAPI {
   reparseDocument(payload: unknown): Promise<ImportedDocument>;
   analyzeDocument(payload: unknown): Promise<DocumentAnalysis>;
   exportOriginal(payload: unknown): Promise<{ saved: boolean }>;
+  workspace(payload: unknown): Promise<WorkspaceResult>;
+  plugins(payload: unknown): Promise<unknown>;
+  onWorkspaceEvent(listener: (event: WorkspaceEvent) => void): () => void;
+}
+
+export interface WorkspaceResult {
+  canceled?: boolean;
+  root?: { id: string; name: string; path: string };
+  entries?: { name: string; path: string; directory: boolean }[];
+  truncated?: boolean;
+  text?: string;
+  image?: string;
+  binary?: boolean;
+}
+export interface WorkspaceEvent {
+  type: 'browser' | 'terminal';
+  url?: string;
+  title?: string;
+  loading?: boolean;
+  canBack?: boolean;
+  canForward?: boolean;
+  error?: string;
+  id?: string;
+  text?: string;
+  stream?: 'stdout' | 'stderr';
+  started?: boolean;
+  done?: boolean;
+  closed?: boolean;
+  exitCode?: number;
+  cwd?: string;
 }
 
 export const providerSchema = z.object({

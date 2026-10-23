@@ -16,7 +16,7 @@ const DB = {
   },
 
   settings: {
-    assistantName: '小鱼'
+    assistantName: '知序'
   },
 
   capacity: {

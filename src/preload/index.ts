@@ -14,7 +14,14 @@ const api: DesktopAPI = {
   importDocument: payload => ipcRenderer.invoke('workbench:document-import', payload),
   reparseDocument: payload => ipcRenderer.invoke('workbench:document-reparse', payload),
   analyzeDocument: payload => ipcRenderer.invoke('workbench:document-analyze', payload),
-  exportOriginal: payload => ipcRenderer.invoke('workbench:document-original', payload)
+  exportOriginal: payload => ipcRenderer.invoke('workbench:document-original', payload),
+  workspace: payload => ipcRenderer.invoke('workbench:workspace', payload),
+  plugins: payload => ipcRenderer.invoke('workbench:plugins', payload),
+  onWorkspaceEvent: listener => {
+    const handler = (_event: Electron.IpcRendererEvent, event: Parameters<typeof listener>[0]) => listener(event);
+    ipcRenderer.on('workbench:workspace-event', handler);
+    return () => ipcRenderer.removeListener('workbench:workspace-event', handler);
+  }
 };
 
 contextBridge.exposeInMainWorld('xiaoyuDesktop', api);

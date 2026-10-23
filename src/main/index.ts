@@ -10,6 +10,8 @@ import { exportBuffer, exportSchema, reportHTML } from './exports';
 import { DocumentFiles } from './document-files';
 import { analyzeDocument } from './document-analysis';
 import { z } from 'zod';
+import { Workspace } from './workspace';
+import { Plugins } from './plugins';
 
 let store: WorkbenchStore;
 let window: BrowserWindow | null = null;
@@ -18,7 +20,7 @@ const dataOverride = process.env.XIAOYU_DATA_DIR;
 const userDataPath = dataOverride || join(app.getPath('appData'), 'Xiaoyu');
 mkdirSync(userDataPath, { recursive: true });
 app.setPath('userData', userDataPath);
-app.setName('Xiaoyu');
+app.setName('知序');
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => {
@@ -74,7 +76,7 @@ else {
       const now = new Date();
       const localDate = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
       const result = await dialog.showSaveDialog(window!, {
-        title: '备份本地数据库', defaultPath: `Xiaoyu-backup-${localDate}.sqlite`,
+        title: '备份本地数据库', defaultPath: `知序备份-${localDate}.sqlite`,
         filters: [{ name: 'SQLite 数据库', extensions: ['sqlite'] }]
       });
       if (result.canceled || !result.filePath) return { saved: false };
@@ -142,7 +144,8 @@ else {
     window = new BrowserWindow({
       width: 1440, height: 960, minWidth: 900, minHeight: 640,
       backgroundColor: '#ffffff',
-      title: '小鱼 · 个人工作台',
+      title: '知序',
+      icon: join(import.meta.dirname, '../renderer/brand/zhixu.png'),
       autoHideMenuBar: true,
       webPreferences: {
         preload: join(import.meta.dirname, '../preload/index.cjs'),
@@ -153,6 +156,22 @@ else {
     });
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', event => event.preventDefault());
+    const workspace = new Workspace(window);
+    const plugins = new Plugins(join(dataDir, 'plugins'), window, {
+      encrypt(value) {
+        if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，插件配置未保存');
+        return safeStorage.encryptString(value).toString('base64');
+      },
+      decrypt: value => safeStorage.decryptString(Buffer.from(value, 'base64'))
+    });
+    ipcMain.handle('workbench:plugins', (event, payload: unknown) => {
+      checkSender(event);
+      return plugins.handle(payload);
+    });
+    ipcMain.handle('workbench:workspace', (event, payload: unknown) => {
+      checkSender(event);
+      return workspace.handle(payload);
+    });
     const devUrl = process.env.ELECTRON_RENDERER_URL;
     if (devUrl) void window.loadURL(devUrl);
     else void window.loadFile(join(import.meta.dirname, '../renderer/index.html'));
@@ -164,14 +183,14 @@ else {
       const currentWindow = window;
       void currentWindow.webContents.executeJavaScript(
         'typeof persistWorkbench === "function" ? persistWorkbench() : Promise.resolve()'
-      ).then(() => currentWindow.destroy()).catch(error => {
+      ).then(async () => { await plugins.dispose(); workspace.dispose(); currentWindow.destroy(); }).catch(error => {
         closing = false;
         dialog.showErrorBox('工作数据尚未保存', String(error));
       });
     });
-    window.on('closed', () => { window = null; });
+    window.on('closed', () => { void plugins.dispose(); workspace.dispose(); window = null; });
   }).catch(error => {
-    dialog.showErrorBox('小鱼启动失败', String(error));
+    dialog.showErrorBox('知序启动失败', String(error));
     app.quit();
   });
 }

@@ -3,8 +3,8 @@
 function ensureChat() {
   if (!state.chatMessages) {
     state.chatMessages = [{ role: 'assistant', time: '现在', model: '系统',
-      text: hasAIProvider() ? '可以向我提问、分析项目或下达工作指令。修改工作数据前会提供待确认的草稿。' :
-        '可以使用本地任务指令；在个人设置中连接模型后，即可进行模型问答和指令分析。' }];
+      text: hasAIProvider() ? '今天有什么需要一起处理？' : '今天想先安排哪件事？',
+      quick: hasAIProvider() ? [] : [{ label: '连接模型', action: 'model-settings' }] }];
   }
 }
 
@@ -16,10 +16,9 @@ function saveChatHistory() {
 
 function defaultChatShortcuts() {
   return [
-    { id: 's-progress', label: '更新项目进展', text: '把星火项目的联调进度更新到 80%，测试库风险升到高' },
-    { id: 's-task', label: '把消息拆成任务', text: '把王总在飞书说的竞品分析拆成任务，今天 17:00 前给结论' },
-    { id: 's-report', label: '生成本周周报', text: '基于本周事实生成周报，重点写风险和下周计划' },
-    { id: 's-capacity', label: '检查今天能否接活', text: '今天还能接一个 2 小时的临时任务吗？' }
+    { id: 's-progress', label: '更新进展', text: '我想更新项目进展：' },
+    { id: 's-task', label: '拆解任务', text: '请帮我把以下内容拆解成任务：' },
+    { id: 's-report', label: '本周总结', text: '基于本周事实生成周报，重点写风险和下周计划' }
   ];
 }
 
@@ -107,7 +106,7 @@ function renderChatShortcuts() {
   return `
     <div class="chat-suggestions-wrap">
       <div class="chat-suggestions">${chips}</div>
-      <button class="shortcut-add" data-action="chat-shortcuts" title="自定义快捷指令">${icon('plus', 12)} 自定义</button>
+      <button class="icon-btn sm shortcut-add" data-action="chat-shortcuts" title="管理快捷指令" aria-label="管理快捷指令">${icon('more', 16)}</button>
     </div>
   `;
 }
@@ -116,7 +115,7 @@ function renderChatMessage(m) {
   const isUser = m.role === 'user';
   const avatar = isUser
     ? `<span class="chat-avatar user" style="background:${DB.user.color}">${esc(DB.user.initials)}</span>`
-    : `<span class="chat-avatar ai">${icon('sparkles', 14)}</span>`;
+    : `<span class="chat-avatar ai">${brandImage()}</span>`;
   const model = String(m.model || '').trim() || '来源未记录';
   const meta = isUser ? `你 · ${esc(m.time)}` :
     `${esc(assistantName())} · <span class="chat-message-model" title="${esc(model)}">${esc(model)}</span> · ${esc(m.time)}`;
@@ -150,7 +149,7 @@ function renderChatMessage(m) {
 function renderChatLoading() {
   return `
     <div class="chat-msg assistant">
-      <span class="chat-avatar ai">${icon('sparkles', 14)}</span>
+      <span class="chat-avatar ai">${brandImage()}</span>
       <div class="chat-msg-body">
         <div class="chat-bubble chat-loading"><i></i><i></i><i></i></div>
         <div class="chat-meta">正在使用 ${esc(state.chatRequestModel || chatModelLabel())}…</div>
@@ -166,16 +165,16 @@ function renderChat() {
   return `
     <div class="page-head chat-page-head">
       <div>
-        <div class="eyebrow">Dialogue · 说一句话就执行</div>
-        <h1>跟${esc(assistantName())}说一句话</h1>
+        <h1>对话</h1>
       </div>
       <div class="head-actions">
-        <span class="chat-memory">${icon('layers', 12)} 连续记忆 · 项目 / 任务 / 工作流</span>
+        <button class="btn btn-sm" data-action="workspace-toggle" aria-pressed="${workspaceState.open}">${icon('folder', 14)} 工作区</button>
+        <button class="btn btn-sm btn-ghost" data-action="chat-details" aria-pressed="${state.chatDetails}">${icon('layers', 14)} 参考内容</button>
       </div>
     </div>
 
-    <div class="chat-layout">
-      <section class="card chat-main">
+    <div class="chat-layout ${state.chatDetails ? 'with-context' : ''} ${workspaceState.open ? 'with-workspace' : ''}">
+      <section class="chat-main" aria-label="对话消息">
         <div class="chat-thread" id="chat-thread">
           ${state.chatMessages.map(renderChatMessage).join('')}
           ${state.chatSending ? renderChatLoading() : ''}
@@ -185,14 +184,14 @@ function renderChat() {
           ${renderChatShortcuts()}
 
           <div class="composer-box">
-            <textarea id="chat-input" rows="2" maxlength="20000" placeholder="提问、分析资料，或告诉我需要安排和修改的工作……">${esc(state.chatDraft || '')}</textarea>
+            <textarea id="chat-input" rows="2" maxlength="20000" aria-label="消息" placeholder="有什么需要一起处理？">${esc(state.chatDraft || '')}</textarea>
             <div class="composer-bar">
               <button class="icon-btn sm" data-action="chat-attachment" title="上传附件" aria-label="上传附件">${icon('plus', 14)}</button>
               <button class="icon-btn sm" data-action="document-library" title="附件记录与待确认项目" aria-label="附件记录与待确认项目">${icon('file', 14)}</button>
               <select class="chat-select" id="chat-context" aria-label="参考范围">
                 ${contexts.map(c => `<option value="${c.id}" ${state.chatContext === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
               </select>
-              <button class="composer-tool" data-action="open-polish" title="润色输入内容">${icon('sparkles', 13)} 润色</button>
+              <button class="icon-btn sm composer-tool" data-action="open-polish" title="润色" aria-label="润色">${icon('sparkles', 15)}</button>
               <span class="composer-spacer"></span>
               <span class="small muted chat-active-model" title="${esc(chatModelLabel())}">${esc(chatModelLabel())}</span>
               <button class="send-btn" data-action="chat-send" aria-label="发送" ${state.chatSending ? 'disabled' : ''}>${icon('arrowUp', 16)}</button>
@@ -201,34 +200,21 @@ function renderChat() {
         </div>
       </section>
 
-      <aside class="chat-rail">
-        <div class="card">
-          <div class="panel-head"><h3>${icon('layers', 14)} 工作上下文</h3><span class="chip ${hasAIProvider() ? 'green' : ''}">${hasAIProvider() ? '模型已配置' : '本地'}</span></div>
+      ${workspaceState.open ? renderWorkspace() : ''}
+      ${state.chatDetails ? `<aside class="chat-rail" aria-label="参考内容">
+        <section>
+          <div class="panel-head"><h3>参考内容</h3><button class="icon-btn sm" data-action="chat-details" title="关闭参考内容" aria-label="关闭参考内容">${icon('x', 14)}</button></div>
           <div class="panel-body">
             <div class="chat-context-list">
-              <div><span>项目字典</span><b>${DB.projects.length} 个</b></div>
-              <div><span>任务记录</span><b>${allWorkbenchTasks().length} 条</b></div>
-              <div><span>今日产能</span><b>${DB.capacity.committed} / ${DB.capacity.available}h</b></div>
-              <div><span>工作流</span><b>v${DB.workflow.version}</b></div>
-              <div><span>快捷指令</span><b>${state.chatShortcuts.length} 条</b></div>
+              <div><span>范围</span><b>${state.chatContext === 'auto' ? '自动匹配' : esc(projectById(state.chatContext)?.name || '未选择')}</b></div>
+              <div><span>项目</span><b>${DB.projects.length}</b></div>
+              <div><span>任务</span><b>${allWorkbenchTasks().length}</b></div>
+              <div><span>今日剩余</span><b>${Math.max(0, DB.capacity.available - DB.capacity.committed).toFixed(1)}h</b></div>
             </div>
-            <button class="btn btn-block mt-12" data-action="nav" data-view="data">${icon('settings', 12)} 调整参考范围</button>
+            <button class="btn btn-block mt-12" data-action="document-library">${icon('file', 14)} 查看附件</button>
           </div>
-        </div>
-
-        <div class="card">
-          <div class="panel-head"><h3>${icon('zap', 14)} 可执行操作</h3></div>
-          <div class="panel-body">
-            <div class="chat-capability"><span>更新任务进度</span><b>需确认</b></div>
-            <div class="chat-capability"><span>新建任务</span><b>需确认</b></div>
-            <div class="chat-capability"><span>更新风险等级</span><b>需确认</b></div>
-            <div class="chat-capability"><span>内容润色 / 改写</span><b>可预览</b></div>
-            <div class="chat-capability"><span>自定义快捷指令</span><b>可编辑</b></div>
-            <div class="chat-capability"><span>生成日报 / 周报</span><b>可预览</b></div>
-          </div>
-        </div>
-
-      </aside>
+        </section>
+      </aside>` : ''}
     </div>
   `;
 }

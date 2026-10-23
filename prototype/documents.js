@@ -1,4 +1,39 @@
 /* Imported documents and editable analysis share the workbench snapshot. */
+async function documentWebRequest(path, options) {
+  let response;
+  try { response = await fetch('/api/documents/' + path, options); }
+  catch { throw new Error('无法连接本机上传服务，请重新启动知序或浏览器预览服务后重试'); }
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.message || `上传服务不可用（HTTP ${response.status}），请重启预览服务后重试`);
+  }
+  return response;
+}
+
+function documentBridge() {
+  if (window.xiaoyuDesktop?.importDocument) return window.xiaoyuDesktop;
+  return {
+    importDocument: async ({ name, bytes }) => (await documentWebRequest('import?name=' + encodeURIComponent(name), {
+      method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes
+    })).json(),
+    reparseDocument: async payload => (await documentWebRequest('reparse', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    })).json(),
+    analyzeDocument: async payload => (await documentWebRequest('analyze', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    })).json(),
+    exportOriginal: async ({ assetId, name }) => {
+      const response = await documentWebRequest('original?assetId=' + encodeURIComponent(assetId));
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url; link.download = name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      return { saved: true };
+    }
+  };
+}
+
 function documentById(id) {
   return DB.documents.find(doc => doc.id === id);
 }
@@ -19,9 +54,7 @@ function openDocumentImport(target = 'chat') {
     ${selectField('import-project', '项目归属', [['', '自动识别；新项目待确认'], ...DB.projects.map(p => [p.id, p.name])], state.importProjectId)}
     ${selectField('document-engine', '分析方式', documentEngineChoices(), hasAIProvider() ? 'ai' : 'local')}
     ${textField('document-instructions', '通用分析指令', DB.documentInstructions || '提取可执行任务、负责人、截止日期和交付物；缺失信息标记待确认，不推测承诺。')}
-    </div><p class="small muted mt-12">${window.xiaoyuDesktop?.importDocument
-      ? '支持 DOC、DOCX、XLSX、PDF、PPTX、TXT、MD、CSV。旧版 XLS、PPT 请先另存为 XLSX、PPTX。'
-      : '浏览器预览支持文本；Word、Excel、PDF 和 PPTX 请使用桌面版。'}</p>
+    </div><p class="small muted mt-12">支持 DOC、DOCX、XLSX、PDF、PPTX、TXT、MD、CSV。旧版 XLS、PPT 请先另存为 XLSX、PPTX。</p>
     <p class="small muted mt-12">原文件先保存，再解析正文。解析失败可从附件记录重新解析或导出原文件。扫描 PDF 需先 OCR。</p>
     <p class="small muted mt-12">选择 AI 时，正文会发送到已配置的供应商；本地规则只提取行动语句，自定义分析指令由 AI 处理。</p>
     <div id="document-import-status" class="small mt-12" role="status" aria-live="polite"></div>
@@ -40,6 +73,7 @@ async function analyzeImportedDocument(doc) {
     protocol: provider.protocol || 'auto'
   };
   if (window.xiaoyuDesktop?.analyzeDocument) return window.xiaoyuDesktop.analyzeDocument(input);
+  if (typeof fetch === 'function') return documentBridge().analyzeDocument(input);
   const matches = DB.projects.filter(p => (doc.title + '\n' + doc.content).includes(p.name));
   const lines = doc.content.split('\n').map(line => line.trim()).filter(Boolean);
   return { summary: lines.slice(0, 6).join('\n').slice(0, 3000),
@@ -84,8 +118,8 @@ async function importDocuments() {
         if (!file.size) throw new Error('文件为空，请选择包含正文的文件');
         if (file.size > 50 * 1024 * 1024) throw new Error('文件超过 50 MB，请压缩或拆分后上传');
         let parsed;
-        if (window.xiaoyuDesktop?.importDocument) {
-          parsed = await window.xiaoyuDesktop.importDocument({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
+        if (window.xiaoyuDesktop?.importDocument || typeof fetch === 'function') {
+          parsed = await documentBridge().importDocument({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
         } else {
           if (!/\.(txt|md|csv)$/i.test(file.name)) throw new Error('此格式请使用桌面版上传');
           const text = await file.text();
@@ -174,14 +208,13 @@ async function finishDocumentAnalysis(doc, projectId) {
 async function reparseSavedDocument() {
   const doc = documentById(state.documentId);
   if (!doc?.assetId || state.documentReparsing) return;
-  if (!window.xiaoyuDesktop?.reparseDocument) { showToast('请使用更新后的桌面版重新解析'); return; }
   state.documentReparsing = true;
   const button = document.querySelector('[data-action="document-reparse"]');
   if (button) { button.disabled = true; button.textContent = '正在解析原文件…'; }
   doc.instructions = fieldValue('document-edit-instructions').slice(0, 4000);
   doc.analysisEngine = fieldValue('document-engine') || 'local';
   try {
-    const result = await window.xiaoyuDesktop.reparseDocument({ assetId: doc.assetId });
+    const result = await documentBridge().reparseDocument({ assetId: doc.assetId });
     if (!result.parseError) {
       const total = DB.documents.reduce((sum, other) => sum + (other.id === doc.id ? 0 : other.content.length), 0);
       if (total + result.text.length > 10000000) throw new Error('正文总量已达上限，请先导出整理附件记录');
@@ -434,7 +467,7 @@ async function reanalyzeDocument(confirmed = false) {
 
 async function exportDocumentOriginal() {
   const doc = documentById(state.documentId);
-  if (!doc?.assetId || !window.xiaoyuDesktop?.exportOriginal) throw new Error('此附件没有保存原文件');
-  const result = await window.xiaoyuDesktop.exportOriginal({ assetId: doc.assetId, name: doc.title });
+  if (!doc?.assetId) throw new Error('此附件没有保存原文件');
+  const result = await documentBridge().exportOriginal({ assetId: doc.assetId, name: doc.title });
   if (result.saved) showToast('原文件已导出');
 }

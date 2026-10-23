@@ -5,10 +5,10 @@ import { Worker } from 'node:worker_threads';
 import { documentInputSchema, type ImportedDocument } from '../shared/contracts';
 import { z } from 'zod';
 
-export async function parseInWorker(payload: unknown) {
+export async function parseInWorker(payload: unknown, workerPath = join(import.meta.dirname, 'document-worker.js')) {
   return new Promise<{ text: string; warnings: string[] }>((resolve, reject) => {
     let settled = false;
-    const worker = new Worker(join(import.meta.dirname, 'document-worker.js'), {
+    const worker = new Worker(workerPath, {
       workerData: payload, resourceLimits: { maxOldGenerationSizeMb: 1024 }
     });
     const timer = setTimeout(() => { settled = true; void worker.terminate(); reject(new Error('解析超过 180 秒，原文件已保留，可稍后重试解析或拆分文件')); }, 180000);
@@ -24,8 +24,8 @@ export async function parseInWorker(payload: unknown) {
       finish();
       const code = (error as NodeJS.ErrnoException).code || '';
       reject(new Error(code === 'ERR_WORKER_OUT_OF_MEMORY' ? '文档解析内存不足，请拆分文件后重试' :
-        /MODULE_NOT_FOUND/.test(code) ? '桌面版本缺少文档解析组件，请更新当前小鱼程序后重试' :
-          '文档解析进程启动或运行失败，请重新打开当前小鱼程序后重试；仍失败时请将文件另存为标准格式'));
+        /MODULE_NOT_FOUND/.test(code) ? '桌面版本缺少文档解析组件，请更新知序后重试' :
+          '文档解析进程启动或运行失败，请重新打开知序后重试；仍失败时请将文件另存为标准格式'));
     });
     worker.once('exit', code => {
       clearTimeout(timer);
@@ -79,10 +79,15 @@ export class DocumentFiles {
     return join(this.directory, assetId);
   }
 
-  async export(assetId: string, destination: string) {
+  async original(assetId: string) {
     const path = this.path(assetId);
     const bytes = await readFile(path);
     if (createHash('sha256').update(bytes).digest('hex') !== assetId.split('.')[0]) throw new Error('原附件校验失败，请从原始文件重新上传');
-    await copyFile(path, destination);
+    return bytes;
+  }
+
+  async export(assetId: string, destination: string) {
+    await this.original(assetId);
+    await copyFile(this.path(assetId), destination);
   }
 }

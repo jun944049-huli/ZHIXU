@@ -83,12 +83,15 @@ function openProjectEditor(id, focusStakeholders = false) {
         <div class="modal-body form-grid">
           <div class="field full"><label for="project-name">项目名称 *</label>
             <input class="input" id="project-name" maxlength="80" value="${esc(p.name)}" required></div>
-          <div class="field"><label for="project-code">项目代号</label>
-            <input class="input" id="project-code" maxlength="20" value="${esc(p.code)}"></div>
-          <div class="field"><label for="project-owner">负责人</label>
+          <div class="field full"><label for="project-owner">负责人</label>
             <input class="input" id="project-owner" maxlength="40" value="${esc(p.owner)}"></div>
           <div class="field full"><label for="project-goal">目标</label>
             <textarea class="input" id="project-goal" maxlength="1000" rows="3">${esc(p.goal)}</textarea></div>
+          <details class="project-advanced full">
+            <summary>进度与其他信息</summary>
+            <div class="form-grid mt-16">
+          <div class="field"><label for="project-code">项目代号</label>
+            <input class="input" id="project-code" maxlength="20" value="${esc(p.code)}"></div>
           <div class="field"><label for="project-progress">完成进度（%）</label>
             <input class="input" id="project-progress" type="number" min="0" max="100" step="1" value="${p.progress}"></div>
           <div class="field"><label for="project-health">健康度</label>
@@ -99,6 +102,9 @@ function openProjectEditor(id, focusStakeholders = false) {
             <input class="input" id="project-next" maxlength="80" value="${esc(p.next === '未安排' ? '' : p.next)}"></div>
           <div class="field"><label for="project-next-date">节点日期</label>
             <input class="input" id="project-next-date" maxlength="30" value="${esc(p.nextDate === '—' ? '' : p.nextDate)}" placeholder="例如 2026-11-01"></div>
+          ${customFieldInputs('project', p)}
+            </div>
+          </details>
           <section class="project-stakeholders full" aria-labelledby="project-stakeholders-title">
             <div class="stakeholder-editor-head row gap-8">
               <h3 id="project-stakeholders-title">干系人</h3>
@@ -107,7 +113,6 @@ function openProjectEditor(id, focusStakeholders = false) {
             <div id="project-stakeholder-list">${projectStakeholderRows()}</div>
             <p class="stakeholder-error small" id="project-stakeholder-error" role="alert" hidden></p>
           </section>
-          ${customFieldInputs('project', p)}
         </div>
         <div class="modal-foot">
           <button class="btn" data-action="close-modal">取消</button>
@@ -146,13 +151,13 @@ function openProjectDelete(id) {
     </div>`;
 }
 
-function openProfileSettings() {
+function openProfileSettings(tab = 'general') {
   const u = DB.user;
   const colors = ['#2F5BE3', '#1F8A70', '#C07A2B', '#6B5BD2', '#B85C7A', '#4C7A3F', '#4B5563'];
   const custom = (DB.settings && DB.settings.customProvider) || {};
   const activeProvider = (DB.settings && DB.settings.aiProvider) || (deepseekKey() ? 'deepseek' : 'local');
   const detected = custom.detected || detectAIProvider(custom.baseUrl, custom.model);
-  state.profileDraft = { color: u.color, assistantName: assistantName(), customProviderActive: activeProvider === 'custom' };
+  state.profileDraft = { color: u.color, avatarImage: u.avatarImage || '', assistantName: assistantName(), customProviderActive: activeProvider === 'custom' };
   state.customProviderTested = false;
   state.customProviderFingerprint = '';
   state.customProviderModels = custom.model ? [custom.model] : [];
@@ -162,25 +167,36 @@ function openProfileSettings() {
   const root = document.getElementById('modal-root');
   root.innerHTML = `
     <div class="modal-backdrop" data-action="backdrop">
-      <div class="modal profile-modal" style="width:min(560px, calc(100vw - 40px))" role="dialog" aria-modal="true" aria-label="个人资料与设置">
+      <div class="modal profile-modal" role="dialog" aria-modal="true" aria-label="设置">
         <div class="modal-head">
           <div class="ai-orb">${icon('settings', 16)}</div>
           <div>
-            <h2>个人资料与设置</h2>
-            <p class="sub">管理姓名、角色与助手名称；左上角工作区会自动跟随姓名。</p>
+            <h2>设置</h2>
           </div>
           <button class="icon-btn" data-action="close-modal" aria-label="关闭">${icon('x', 16)}</button>
         </div>
 
+        <div class="settings-tabs" role="tablist" aria-label="设置分类">
+          <button type="button" role="tab" id="settings-tab-general" aria-controls="settings-general" data-action="settings-tab" data-tab="general">通用</button>
+          <button type="button" role="tab" id="settings-tab-models" aria-controls="settings-models" data-action="settings-tab" data-tab="models">模型</button>
+        </div>
         <div class="modal-body">
+          <section class="settings-pane" id="settings-general" role="tabpanel" aria-labelledby="settings-tab-general" data-settings-pane="general">
           <div class="profile-preview">
-            <span class="avatar lg" id="profile-avatar" style="background:${u.color}">${esc(u.initials)}</span>
+            <span class="avatar lg" id="profile-avatar" style="background:${esc(u.color)}">${profileAvatarContent(u)}</span>
             <div>
               <div class="profile-preview-name" id="profile-preview-name">${esc(u.name)}</div>
               <div class="profile-preview-role" id="profile-preview-role">${esc(u.role)}</div>
             </div>
-            <span class="chip outline">${icon('lock', 11)} 本地资料</span>
           </div>
+          <div class="profile-photo-controls">
+            <label class="btn btn-sm profile-photo-upload" for="profile-photo">${icon('upload', 13)} 上传头像
+              <input type="file" id="profile-photo" accept="image/png,image/jpeg,image/webp" aria-label="上传头像">
+            </label>
+            <button class="btn btn-sm" data-action="profile-photo-remove" ${u.avatarImage ? '' : 'hidden'}>移除照片</button>
+            <span class="small muted">JPG、PNG、WebP · 最大 5 MB</span>
+          </div>
+          <p id="profile-photo-status" class="small" role="status" aria-live="polite"></p>
 
           <div class="form-grid">
             <div class="field">
@@ -204,7 +220,6 @@ function openProfileSettings() {
                 <option value="独立开发者">
                 <option value="团队负责人">
               </datalist>
-              <div class="hint">会显示在左下角，也会作为新项目的默认负责人。</div>
             </div>
 
             <div class="field full">
@@ -216,38 +231,31 @@ function openProfileSettings() {
 
             <div class="field full settings-field">
               <label>${icon('sparkles', 11)} 助手名称</label>
-              <input class="input" id="profile-assistant-name" value="${esc(assistantName())}" maxlength="12" placeholder="小鱼">
-              <div class="hint">显示在侧边栏、对话标题、页面标题与命令面板。默认：小鱼。</div>
+              <input class="input" id="profile-assistant-name" value="${esc(assistantName())}" maxlength="12" placeholder="知序">
             </div>
-
+          </div>
+          </section>
+          <section class="settings-pane" id="settings-models" role="tabpanel" aria-labelledby="settings-tab-models" data-settings-pane="models">
+          <div class="form-grid">
+            <details class="provider-quick full">
+              <summary>DeepSeek 快速接入</summary>
             <div class="field full settings-field">
               <label>${icon('zap', 11)} DeepSeek API Key ${activeProvider === 'deepseek' ? '<span class="chip green">当前</span>' : ''}</label>
               <div class="row gap-6">
                 <input class="input" id="profile-deepseek-key" type="password" value="${esc(DB.settings.deepseekKey || '')}" placeholder="sk-..." autocomplete="off" spellcheck="false" style="flex:1">
                 <button class="btn btn-sm" data-action="test-deepseek">${icon('zap', 11)} 测试连接</button>
               </div>
-              <div class="hint" id="deepseek-test-result">${window.xiaoyuDesktop ? '密钥使用系统安全存储加密，留空时润色使用本地规则。' : '仅保存在本机浏览器；留空时润色使用本地规则。代理只监听 127.0.0.1。'}</div>
+              <div class="hint" id="deepseek-test-result">填写密钥后测试连接。</div>
             </div>
-
+            </details>
             <div class="field full settings-field custom-provider-box">
               <div class="custom-provider-head">
-                <label>${icon('link', 11)} 自定义供应商</label>
-                <span class="chip ${activeProvider === 'custom' ? 'green' : 'outline'}" id="custom-provider-current">${activeProvider === 'custom' ? '当前供应商' : '可选'}</span>
+                <label>${icon('link', 11)} 模型连接</label>
+                <span class="chip ${activeProvider === 'custom' ? 'green' : 'outline'}" id="custom-provider-current">${activeProvider === 'custom' ? '使用中' : '未连接'}</span>
               </div>
               <div class="custom-provider-grid">
-                <div class="field">
-                  <label>供应商名称</label>
-                  <input class="input" id="custom-provider-name" value="${esc(custom.name || '')}" placeholder="自动识别" maxlength="30">
-                </div>
-                <div class="field">
-                  <label for="custom-provider-protocol">接入协议</label>
-                  <select class="select" id="custom-provider-protocol">
-                    ${[['auto', '自动识别'], ['chat', 'Chat Completions'], ['responses', 'Responses API']].map(([value, label]) =>
-                      `<option value="${value}" ${value === (custom.protocol || 'auto') ? 'selected' : ''}>${label}</option>`).join('')}
-                  </select>
-                </div>
                 <div class="field full">
-                  <label>API Base URL</label>
+                  <label>API 地址</label>
                   <input class="input" id="custom-provider-base" value="${esc(custom.baseUrl || '')}" placeholder="https://api.openai.com/v1" autocomplete="off" spellcheck="false">
                 </div>
                 <div class="field full">
@@ -257,49 +265,136 @@ function openProfileSettings() {
                   </div>
                 </div>
                 <div class="field full">
-                  <label for="custom-provider-model-select">可用模型</label>
+                  <label for="custom-provider-model-select">模型</label>
                   <div class="provider-model-controls">
                     <select class="select" id="custom-provider-model-select"><option value="">填写地址与密钥后自动获取</option>
                       ${custom.model ? `<option value="${esc(custom.model)}" selected>${esc(custom.model)}</option>` : ''}</select>
                     <button class="btn btn-sm" data-action="fetch-custom-models">${icon('refresh', 12)} 获取模型</button>
                   </div>
-                  <label class="tiny muted" for="custom-provider-model">当前模型 / 手动填写</label>
-                  <input class="input" id="custom-provider-model" value="${esc(custom.model || '')}" placeholder="自动选取文本模型，也可手动填写" maxlength="120" autocomplete="off" spellcheck="false">
                 </div>
+                <details class="provider-advanced full">
+                  <summary>高级设置</summary>
+                  <div class="form-grid">
+                    <div class="field"><label>供应商名称</label>
+                      <input class="input" id="custom-provider-name" value="${esc(custom.name || '')}" placeholder="自动识别" maxlength="30"></div>
+                    <div class="field"><label for="custom-provider-protocol">协议</label>
+                      <select class="select" id="custom-provider-protocol">
+                        ${[['auto', '自动识别'], ['chat', 'Chat Completions'], ['responses', 'Responses API']].map(([value, label]) =>
+                          `<option value="${value}" ${value === (custom.protocol || 'auto') ? 'selected' : ''}>${label}</option>`).join('')}
+                      </select></div>
+                    <div class="field full"><label for="custom-provider-model">手动填写模型</label>
+                      <input class="input" id="custom-provider-model" value="${esc(custom.model || '')}" placeholder="模型 ID" maxlength="120" autocomplete="off" spellcheck="false"></div>
+                  </div>
+                </details>
               </div>
               <div class="custom-provider-detected">
-                <span class="tiny muted">识别结果</span>
+                <span class="tiny muted">供应商</span>
                 <span class="chip outline" id="custom-provider-detected">${esc(detected || '等待输入')}</span>
               </div>
-              <div class="hint" id="custom-provider-result" role="status" aria-live="polite">填入 API 地址与密钥后自动获取模型。诊断会向当前供应商发送一条简短测试请求，可能产生少量费用。</div>
+              <div class="hint" id="custom-provider-result" role="status" aria-live="polite">填写地址与密钥后获取模型。诊断会发送测试请求，可能产生少量费用。</div>
               <button class="btn btn-sm" data-action="test-custom-provider">${icon('zap', 12)} 诊断供应商</button>
               <div id="custom-provider-diagnosis" class="provider-diagnosis" aria-live="polite"></div>
             </div>
           </div>
+          </section>
         </div>
 
         <div class="modal-foot">
-          <div class="left">
-            <span class="chip outline">${icon('shield', 11)} 仅本地存储</span>
-          </div>
           <button class="btn" data-action="close-modal">取消</button>
           <button class="btn btn-primary" data-action="save-profile">${icon('check', 13)} 保存</button>
         </div>
       </div>
     </div>
   `;
+  switchSettingsTab(tab);
+}
+
+function switchSettingsTab(tab) {
+  const selected = tab === 'models' ? 'models' : 'general';
+  document.querySelectorAll('[data-settings-pane]').forEach(pane => {
+    pane.hidden = pane.dataset.settingsPane !== selected;
+  });
+  document.querySelectorAll('[data-action="settings-tab"]').forEach(button => {
+    button.setAttribute('aria-selected', String(button.dataset.tab === selected));
+    button.tabIndex = button.dataset.tab === selected ? 0 : -1;
+  });
 }
 
 function setAvatarColor(color) {
+  if (!/^#[0-9a-f]{6}$/i.test(color)) return;
   state.profileDraft.color = color;
+  state.profileDraft.avatarImage = '';
   document.querySelectorAll('.color-swatch').forEach(el => {
     el.classList.toggle('on', el.dataset.color === color);
   });
+  refreshProfileAvatar();
+}
+
+function refreshProfileAvatar() {
   const av = document.getElementById('profile-avatar');
-  if (av) av.style.background = color;
+  if (av) {
+    av.style.background = state.profileDraft.color;
+    av.innerHTML = profileAvatarContent({ ...state.profileDraft,
+      initials: document.getElementById('profile-initials')?.value.trim() ||
+        deriveInitials(document.getElementById('profile-name')?.value || DB.user.name) });
+  }
+  const remove = document.querySelector('[data-action="profile-photo-remove"]');
+  if (remove) remove.hidden = !state.profileDraft.avatarImage;
+}
+
+function removeProfilePhoto() {
+  state.profileDraft.avatarImage = '';
+  const input = document.getElementById('profile-photo');
+  if (input) input.value = '';
+  refreshProfileAvatar();
+}
+
+async function importProfilePhoto(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const draft = state.profileDraft;
+  const status = document.getElementById('profile-photo-status');
+  const save = document.querySelector('[data-action="save-profile"]');
+  draft.photoBusy = true;
+  if (save) save.disabled = true;
+  status.textContent = '正在读取头像…';
+  try {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('请选择 JPG、PNG 或 WebP 图片');
+    if (file.size > 5 * 1024 * 1024) throw new Error('头像不能超过 5 MB');
+    const source = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('图片读取失败，请重新选择'));
+      reader.readAsDataURL(file);
+    });
+    const image = new Image();
+    image.src = source;
+    await image.decode();
+    if (!image.naturalWidth || image.naturalWidth * image.naturalHeight > 25000000) throw new Error('图片尺寸过大，请缩小至 2500 万像素以内');
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 192;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 192, 192);
+    const side = Math.min(image.naturalWidth, image.naturalHeight);
+    ctx.drawImage(image, (image.naturalWidth - side) / 2, (image.naturalHeight - side) / 2, side, side, 0, 0, 192, 192);
+    if (state.profileDraft !== draft || !input.isConnected) return;
+    draft.avatarImage = canvas.toDataURL('image/jpeg', .88);
+    refreshProfileAvatar();
+    status.textContent = '头像已选好，保存后生效。';
+  } catch (error) {
+    if (state.profileDraft === draft && input.isConnected) status.textContent =
+      '头像读取失败：' + (error.message?.includes('图片') || error.message?.includes('头像') || error.message?.includes('请选择')
+        ? error.message : '图片损坏或无法识别，请重新选择');
+  } finally {
+    draft.photoBusy = false;
+    if (save?.isConnected) save.disabled = false;
+    input.value = '';
+  }
 }
 
 async function saveProfile() {
+  if (state.profileDraft.photoBusy) return;
   const nameEl = document.getElementById('profile-name');
   const roleEl = document.getElementById('profile-role');
   const iniEl = document.getElementById('profile-initials');
@@ -317,7 +412,7 @@ async function saveProfile() {
   const workspace = name + '的工作台';
   const initials = (iniEl.value.trim() || deriveInitials(name)).slice(0, 2);
   const color = state.profileDraft.color || DB.user.color;
-  const assistant = ((assistantEl && assistantEl.value.trim()) || '小鱼').slice(0, 12);
+  const assistant = ((assistantEl && assistantEl.value.trim()) || '知序').slice(0, 12);
   const deepseek = deepseekEl ? deepseekEl.value.trim() : String((DB.settings && DB.settings.deepseekKey) || '');
   const customName = customNameEl ? customNameEl.value.trim() : '';
   let customModel = customModelEl ? customModelEl.value.trim() : '';
@@ -344,6 +439,7 @@ async function saveProfile() {
   DB.user.workspace = workspace;
   DB.user.initials = initials;
   DB.user.color = color;
+  DB.user.avatarImage = state.profileDraft.avatarImage || '';
   DB.settings = DB.settings || {};
   DB.settings.assistantName = assistant;
   DB.settings.deepseekKey = deepseek;
@@ -379,11 +475,11 @@ async function saveProfile() {
     });
   });
 
-  try { storageSet('jw-profile', JSON.stringify({ name, role, initials, color })); } catch (e) { /* ignore */ }
+  try { storageSet('jw-profile', JSON.stringify({ name, role, initials, color, avatarImage: DB.user.avatarImage })); } catch (e) { /* ignore */ }
   saveSettings();
   closeModal();
   render();
-  showToast('已保存 · 当前供应商 ' + aiProviderName());
+  showToast('设置已保存');
 }
 
 async function testDeepSeek() {
@@ -603,7 +699,7 @@ function saveWorkflow() {
   DB.workflow.text = ta.value.trim();
   DB.workflow.updated = '刚刚';
   updateWorkflowChrome();
-  showToast('工作流规划已保存，自动执行尚未接入');
+  showToast('工作约定已保存');
 }
 
 const workflowTemplates = {
@@ -632,8 +728,7 @@ function openCapture(projectId = null) {
         <div class="modal-head">
           <div class="ai-orb">${icon('sparkles', 16)}</div>
           <div>
-            <h2>快速捕获</h2>
-            <p class="sub">粘贴老板原话、会议纪要或邮件。AI 只出草稿，你确认后才进项目。</p>
+            <h2>添加事项</h2>
           </div>
           <button class="icon-btn" data-action="close-modal" aria-label="关闭">${icon('x', 16)}</button>
         </div>
@@ -641,16 +736,10 @@ function openCapture(projectId = null) {
         <div class="modal-body">
           <div class="capture-source">
             ${sources.map(s => `<button class="chip ${state.captureSource === s ? 'on' : ''}" data-action="capture-source" data-source="${s}">${s}</button>`).join('')}
-            <span class="chip outline">${icon('lock', 11)} 本地存储</span>
-            <button class="chip accent" data-action="nav" data-view="data">${icon('sparkles', 11)} 我的工作流 v${DB.workflow.version}</button>
           </div>
 
           <div class="capture-area">
             <textarea id="capture-text" placeholder="${esc(sample)}"></textarea>
-            <div class="capture-hint">
-              <span>原文会永久保留 · 可随时回溯</span>
-              <span>Ctrl + Enter 解析</span>
-            </div>
           </div>
 
           <div id="capture-result"></div>
@@ -756,17 +845,17 @@ function openCommand() {
         </div>
         <div class="command-list" id="command-list">
           <div class="command-group-label">跳转</div>
-          <button class="command-item" data-action="nav" data-view="today">${icon('sun', 15)} 今日 <span class="ci-sub">T</span></button>
-          <button class="command-item" data-action="nav" data-view="chat">${icon('message', 15)} 跟${esc(assistantName())}对话 <span class="ci-sub">AI</span></button>
-          <button class="command-item" data-action="nav" data-view="inbox">${icon('inbox', 15)} 收件箱 <span class="ci-sub">I</span></button>
-          <button class="command-item" data-action="nav" data-view="projects">${icon('layout', 15)} 项目组合 <span class="ci-sub">P</span></button>
-          <button class="command-item" data-action="nav" data-view="reports">${icon('file', 15)} 报表 <span class="ci-sub">R</span></button>
-          <button class="command-item" data-action="nav" data-view="profile">${icon('user', 15)} 工作方式画像</button>
-          <button class="command-item" data-action="nav" data-view="data">${icon('database', 15)} 数据与集成</button>
+          <button class="command-item" data-action="nav" data-view="today">${icon('sun', 15)} 今天</button>
+          <button class="command-item" data-action="nav" data-view="chat">${icon('message', 15)} 对话</button>
+          <button class="command-item" data-action="nav" data-view="inbox">${icon('inbox', 15)} 收件箱</button>
+          <button class="command-item" data-action="nav" data-view="projects">${icon('layout', 15)} 项目</button>
+          <button class="command-item" data-action="nav" data-view="reports">${icon('file', 15)} 报告</button>
+          <button class="command-item" data-action="nav" data-view="profile">${icon('chart', 15)} 回顾</button>
+          <button class="command-item" data-action="nav" data-view="data">${icon('database', 15)} 连接与数据</button>
 
           <div class="command-group-label">操作</div>
-          <button class="command-item" data-action="capture">${icon('plus', 15)} 快速捕获 <span class="ci-sub">Ctrl Space</span></button>
-          <button class="command-item" data-action="impact">${icon('zap', 15)} 项目影响</button>
+          <button class="command-item" data-action="capture">${icon('plus', 15)} 添加事项</button>
+          <button class="command-item" data-action="impact">${icon('calendar', 15)} 安排临时任务</button>
           <button class="command-item" data-action="profile-settings">${icon('settings', 15)} 设置</button>
           <button class="command-item" data-action="command-weekly">${icon('sparkles', 15)} 生成周报</button>
           <button class="command-item" data-action="new-project">${icon('folder', 15)} 新建项目</button>

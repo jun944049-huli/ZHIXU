@@ -33,11 +33,10 @@ function initializeIntegrations() {
   DB.integrationLogs = DB.integrationLogs || [];
   DB.integrationReceipts = DB.integrationReceipts || [];
   // Remove prototype connection indicators, including snapshots saved by older versions.
-  DB.connectors.forEach(c => { c.status = c.id === 'manual' ? 'on' : 'off'; });
+  DB.connectors.forEach(c => { c.status = 'off'; });
 }
 
 function integrationStatus(id) {
-  if (id === 'manual') return { on: true, label: '可用', meta: '本机手动捕获' };
   if (!INTEGRATIONS[id]) return { on: false, label: '尚未接入', meta: '开发中' };
   const config = DB.settings.integrations[id];
   const result = DB.integrationState[id];
@@ -69,7 +68,7 @@ function openIntegrationPicker() {
 }
 
 function openIntegration(id) {
-  if (id === 'manual') { openCapture(); return; }
+  if (id === 'manual') { state.dataTab = 'plugins'; state.view = 'data'; render(); return; }
   const connector = DB.connectors.find(c => c.id === id);
   if (!connector) return;
   const definition = INTEGRATIONS[id];

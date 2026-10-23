@@ -53,6 +53,12 @@ async function saveProject() {
   const progressInput = document.getElementById('project-progress');
   const progress = Number(progressInput.value);
   if (!name || !progressInput.value || !progressInput.checkValidity() || !Number.isFinite(progress)) {
+    if (!name) document.getElementById('project-name').focus?.();
+    else {
+      const advanced = progressInput.closest?.('details');
+      if (advanced) advanced.open = true;
+      progressInput.focus?.();
+    }
     showToast('请填写项目名称，进度须为 0 到 100 的整数');
     return;
   }

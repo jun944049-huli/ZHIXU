@@ -20,6 +20,35 @@ function initializeFeatures() {
     detail.tasks = [];
   });
   DB.projects.forEach(p => { p.risks = detailForProject(p).risks.filter(r => r.status !== 'closed').length; });
+  migrateOverdueTasks();
+}
+
+function migrateOverdueTasks() {
+  // Older releases kept reminders separately. Preserve their identities once,
+  // then derive every reminder from the actual task instead of a second list.
+  for (const item of DB.overdue || []) {
+    const match = allWorkbenchTasks().find(task => item.taskId ? task.id === item.taskId
+      : task.project === item.project && task.title === item.title);
+    if (match) {
+      if (!taskDeadlineDate(match)) match.deadlineDate = addDaysISO(DB.meta.today, -Math.max(1, Number(item.days) || 1));
+    } else if (!DB.taskArchive.some(task => task.id === (item.taskId || item.id))) {
+      addConfirmedTask({ ...item, id: item.taskId || item.id || newRecordId('task'),
+        due: addDaysISO(DB.meta.today, -Math.max(1, Number(item.days) || 1)),
+        priority: 'P2', estimate: item.estimate || '1h', done: false }, DB.meta.today, 'should');
+    }
+  }
+  DB.overdue = [];
+  for (const task of allWorkbenchTasks()) {
+    task.scheduledDate ||= taskLocation(task.id)?.date || DB.meta.today;
+    const deadline = taskDeadlineDate(task);
+    if (deadline) {
+      task.deadlineDate = deadline;
+      // Freeze relative dates so "yesterday" cannot shift every time the app opens.
+      task.due = String(task.due || '').replace(/^(昨天|今天|今日|明天)/, deadline);
+    } else if (task.overdue) task.deadlineDate = task.scheduledDate < DB.meta.today
+      ? task.scheduledDate : addDaysISO(DB.meta.today, -1);
+    task.overdue = isTaskOverdue(task);
+  }
 }
 
 function localModal(title, body, footer = '', className = '', headerActions = '') {
@@ -109,10 +138,13 @@ async function saveTaskEditor() {
   const found = taskLocation(state.editTaskId);
   const hours = Number(fieldValue('task-hours'));
   const date = fieldValue('task-date');
-  if (!found || !fieldValue('task-title') || !/^\d{4}-\d{2}-\d{2}$/.test(date) || hours <= 0 || hours > 1000 || !Number.isFinite(hours)) {
+  if (!found || !fieldValue('task-title') || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      toISODate(parseISODate(date)) !== date || hours <= 0 || hours > 1000 || !Number.isFinite(hours)) {
     showToast('请填写标题、日期和有效的预计小时'); return;
   }
   const t = found.task;
+  const previousDue = String(t.due || '');
+  const previousDeadline = taskDeadlineDate(t);
   const status = fieldValue('task-status');
   if (status) {
     t.done = status === 'done';
@@ -126,6 +158,14 @@ async function saveTaskEditor() {
     due: fieldValue('task-due'), estimate: `${hours}h`, priority: fieldValue('task-priority'),
     assignee: fieldValue('task-assignee'), note: fieldValue('task-note'), customValues: { ...t.customValues, ...readCustomFields('task') }
   });
+  if (t.due !== previousDue) {
+    delete t.deadlineDate;
+    t.deadlineDate = taskDeadlineDate(t, date);
+  } else if (date !== found.date && previousDeadline && previousDeadline < DB.meta.today) {
+    t.due = date;
+    t.deadlineDate = date;
+  }
+  t.overdue = isTaskOverdue(t);
   found.list.splice(found.index, 1);
   addConfirmedTask(t, date, ['P0', 'P1'].includes(t.priority) ? 'must' : t.priority === 'P4' ? 'could' : 'should');
   await finishLocal('任务已保存');
@@ -404,9 +444,10 @@ function openWaiting() {
 }
 
 function openOverdue() {
-  const tasks = allWorkbenchTasks().filter(t => !t.done && (t.overdue || (/^\d{4}-\d{2}-\d{2}$/.test(t.due) && t.due < DB.meta.today)));
-  localModal('逾期事项', `<div class="feature-list">${tasks.map(t => `<div class="feature-list-row"><span>${esc(t.title)}</span><button class="btn btn-sm" data-action="task-edit" data-id="${esc(t.id)}">改期 / 编辑</button></div>`).join('')}
-    ${DB.overdue.map(t => `<div class="feature-list-row"><span>${esc(t.title)} · ${t.days} 天</span><button class="btn btn-sm" data-action="overdue-plan" data-id="${esc(t.id)}">安排到今日</button></div>`).join('') || (tasks.length ? '' : '暂无逾期事项')}</div>`);
+  localModal('逾期事项', `<div class="feature-list">${overdueTasks().map(t => `<div class="feature-list-row">
+    <div><b>${esc(t.title)}</b><p class="small muted">${esc(projectById(t.project)?.name || '未归属')} · 逾期 ${t.days} 天</p></div>
+    <button class="btn btn-sm" data-action="task-edit" data-id="${esc(t.id)}">改期 / 编辑</button>
+    <button class="btn btn-sm" data-action="overdue-plan" data-id="${esc(t.id)}">安排到今日</button></div>`).join('') || '暂无逾期事项'}</div>`);
 }
 
 function openNotifications() {
@@ -466,7 +507,7 @@ function exportableSnapshot() {
 }
 
 async function exportAllData() {
-  await saveLocalFile({ title: '小鱼数据-' + DB.meta.today, format: 'json',
+  await saveLocalFile({ title: '知序数据-' + DB.meta.today, format: 'json',
     text: JSON.stringify({ ...exportableSnapshot(), exportedAt: new Date().toISOString(), excludes: '连接凭据与供应商设置' }, null, 2) });
 }
 
@@ -541,14 +582,14 @@ function handleFeatureAction(action, el) {
     case 'waiting': openWaiting(); break;
     case 'overdue': openOverdue(); break;
     case 'overdue-plan': {
-      const index = DB.overdue.findIndex(t => t.id === id);
-      if (index < 0) break;
-      const [item] = DB.overdue.splice(index, 1);
-      const existing = allWorkbenchTasks().find(t => t.title === item.title && !t.done);
-      if (existing) {
-        const located = taskLocation(existing.id); located.list.splice(located.index, 1);
-        existing.overdue = false; existing.due = DB.meta.today; addConfirmedTask(existing, DB.meta.today, 'should');
-      } else addConfirmedTask({ ...item, id: newRecordId('task'), priority: 'P2', estimate: '1h', due: DB.meta.today, done: false }, DB.meta.today, 'should');
+      const located = taskLocation(id);
+      if (!located || !isTaskOverdue(located.task)) break;
+      located.list.splice(located.index, 1);
+      located.task.overdue = false;
+      located.task.due = DB.meta.today;
+      located.task.deadlineDate = DB.meta.today;
+      addConfirmedTask(located.task, DB.meta.today,
+        ['P0', 'P1'].includes(located.task.priority) ? 'must' : located.task.priority === 'P4' ? 'could' : 'should');
       void finishLocal('已安排到今日'); break;
     }
     case 'notifications': openNotifications(); break;
