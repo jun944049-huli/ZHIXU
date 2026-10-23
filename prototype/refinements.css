@@ -296,6 +296,24 @@ summary { cursor: pointer; }
 .modal-head h2 { font-size: 17px; }
 .modal-body { padding: 23px 24px; }
 .modal-foot { padding: 16px 24px; background: var(--surface); }
+.overdue-list .feature-list-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(2, 112px);
+  gap: 16px;
+}
+.overdue-list .btn {
+  width: 100%;
+  height: 36px;
+  min-width: 0;
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .overdue-list .feature-list-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .overdue-item-main { grid-column: 1 / -1; }
+}
 .profile-modal { width: min(640px, calc(100vw - 32px)); }
 .settings-tabs { display: flex; gap: 24px; padding: 0 24px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
 .settings-tabs button { padding: 10px 0; border: 0; background: transparent; font-size: 12px; color: var(--ink-3); border-bottom: 2px solid transparent; }

@@ -444,8 +444,8 @@ function openWaiting() {
 }
 
 function openOverdue() {
-  localModal('逾期事项', `<div class="feature-list">${overdueTasks().map(t => `<div class="feature-list-row">
-    <div><b>${esc(t.title)}</b><p class="small muted">${esc(projectById(t.project)?.name || '未归属')} · 逾期 ${t.days} 天</p></div>
+  localModal('逾期事项', `<div class="feature-list overdue-list">${overdueTasks().map(t => `<div class="feature-list-row">
+    <div class="overdue-item-main"><b>${esc(t.title)}</b><p class="small muted">${esc(projectById(t.project)?.name || '未归属')} · 逾期 ${t.days} 天</p></div>
     <button class="btn btn-sm" data-action="task-edit" data-id="${esc(t.id)}">改期 / 编辑</button>
     <button class="btn btn-sm" data-action="overdue-plan" data-id="${esc(t.id)}">安排到今日</button></div>`).join('') || '暂无逾期事项'}</div>`);
 }

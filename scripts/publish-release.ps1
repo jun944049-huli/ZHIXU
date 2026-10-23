@@ -1,6 +1,7 @@
 param(
   [ValidateSet('create','upload','publish','verify')][string]$Action = 'verify',
-  [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.2.0'
+  [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.2.0',
+  [string]$NotesPath = 'docs/18-0.2.0发布说明.md'
 )
 $ErrorActionPreference = 'Stop'
 $env:GCM_INTERACTIVE = 'never'
@@ -31,7 +32,7 @@ if ($Action -eq 'create') {
   if ($LASTEXITCODE -ne 0) { throw 'Missing Git commit' }
   $request = @{
     tag_name = "v$Version"; target_commitish = $headCommit; name = "知序 $Version"
-    body = [IO.File]::ReadAllText((Join-Path (Get-Location) 'docs/18-0.2.0发布说明.md'))
+    body = [IO.File]::ReadAllText((Join-Path (Get-Location) $NotesPath))
     draft = $true; prerelease = $false
   }
   $requestPath = Join-Path 'release' "release-request-$Version.json"

@@ -10,9 +10,9 @@
 
 ## 当前状态
 
-当前版本为 **0.2.0「知序」**。采用白底 C「序环」图标，统一个人设置、侧栏数量提醒、工作区和插件管理，支持浏览器预览的 Office / PDF 上传。本版修复桌面启动等待与逾期提醒不同步，并改用安装版直接启动。
+当前版本为 **0.2.1「知序」**。采用白底 C「序环」图标，统一个人设置、侧栏数量提醒、工作区和插件管理，支持浏览器预览的 Office / PDF 上传。沿用安装版直接启动及逾期提醒同步修复，本版统一逾期清单按钮的尺寸、对齐和窄屏布局。
 
-发布说明见 [0.2.0 更新](docs/18-0.2.0发布说明.md)，改版记录见 [知序改版预览](docs/16-知序改版预览.md)，图标对比见 [品牌方案](design-review/品牌方案.html)。
+发布说明见 [0.2.1 更新](docs/19-0.2.1发布说明.md)，上一版见 [0.2.0 更新](docs/18-0.2.0发布说明.md)，改版记录见 [知序改版预览](docs/16-知序改版预览.md)，图标对比见 [品牌方案](design-review/品牌方案.html)。
 
 已接通真实存储的功能：
 
@@ -64,7 +64,7 @@
 ## 桌面版
 
 从 [GitHub Releases](https://github.com/jun944049-huli/HULIKU/releases) 下载
-`Zhixu-0.2.0-Windows-Setup.exe`，安装一次后从“知序”快捷方式打开，无需安装 Node.js 或 Python。
+`Zhixu-0.2.1-Windows-Setup.exe`，安装一次后从“知序”快捷方式打开，无需安装 Node.js 或 Python。
 
 本机迭代统一更新 `%LOCALAPPDATA%\Programs\Xiaoyu\Xiaoyu.exe`，
 桌面仅保留“知序”快捷方式（由原“小鱼测试版”更名）。更新时正常关闭程序后运行新版安装包，
@@ -105,6 +105,7 @@ npm run test:design
 npm run test:workspace
 npm run test:plugins
 npm run test:overdue
+npm run test:overdue-layout
 npm run test:startup
 npm run dist
 ```
