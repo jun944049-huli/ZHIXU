@@ -120,15 +120,16 @@ function openTaskEditor(id) {
   state.editTaskId = id;
   const t = found.task;
   localModal('编辑任务', `<div class="form-grid">
-    ${inputField('task-title', '任务标题', t.title, 'text', 'maxlength="150"')}
+    ${inputField('task-title', '任务标题', t.title, 'text', 'maxlength="200"')}
     ${selectField('task-project', '项目', projectChoices(), t.project || '')}
     ${inputField('task-date', '安排日期', found.date, 'date')}
     ${inputField('task-due', '截止说明', t.due)}
-    ${inputField('task-hours', '预计小时', parseEstimateHours(t.estimate), 'number', 'min="0.1" max="1000" step="0.1"')}
+    ${inputField('task-hours', '预计小时 · 0 为待估时', parseEstimateHours(t.estimate), 'number', 'min="0" max="1000" step="0.1"')}
     ${selectField('task-priority', '优先级', ['P0', 'P1', 'P2', 'P3', 'P4'].map(p => [p, p]), t.priority)}
     ${selectField('task-status', '状态', [['open', '待开始'], ['doing', '进行中'], ['blocked', '阻塞'], ['done', '已完成']],
       t.done ? 'done' : t.blocked ? 'blocked' : t.status === '进行中' ? 'doing' : 'open')}
     ${inputField('task-assignee', '负责人', t.assignee || DB.user.name)}
+    ${textField('task-details', '详细', t.details || '')}
     ${textField('task-note', '备注', t.note || '')}
     ${customFieldInputs('task', t)}</div>`,
     `<button class="btn btn-danger" data-action="task-delete">${icon('trash', 13)} 删除任务</button>${saveButton('task-save')}`, 'task-editor');
@@ -139,7 +140,7 @@ async function saveTaskEditor() {
   const hours = Number(fieldValue('task-hours'));
   const date = fieldValue('task-date');
   if (!found || !fieldValue('task-title') || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
-      toISODate(parseISODate(date)) !== date || hours <= 0 || hours > 1000 || !Number.isFinite(hours)) {
+      toISODate(parseISODate(date)) !== date || hours < 0 || hours > 1000 || !Number.isFinite(hours)) {
     showToast('请填写标题、日期和有效的预计小时'); return;
   }
   const t = found.task;
@@ -152,7 +153,8 @@ async function saveTaskEditor() {
   }
   Object.assign(t, {
     title: fieldValue('task-title'), project: fieldValue('task-project') || null,
-    due: fieldValue('task-due'), estimate: `${hours}h`, priority: fieldValue('task-priority'),
+    due: fieldValue('task-due'), estimate: hours ? `${hours}h` : '待估时', priority: fieldValue('task-priority'),
+    details: document.getElementById('task-details') ? fieldValue('task-details') : t.details || '',
     assignee: fieldValue('task-assignee'), note: fieldValue('task-note'), customValues: { ...t.customValues, ...readCustomFields('task') }
   });
   if (t.due !== previousDue) {
@@ -614,12 +616,14 @@ function handleFeatureAction(action, el) {
     case 'chat-attachment': openTextImport('chat'); break;
     case 'document-import': void importTextDocument().catch(error => showToast(error.message || '文件读取失败')); break;
     case 'document-open': openDocument(id); break;
+    case 'document-chat-details': openDocumentChatDetails(id); break;
     case 'document-library': openDocumentLibrary(); break;
     case 'document-save': void saveDocumentEditor().catch(error => showToast(error.message || '文档保存失败')); break;
     case 'document-apply': void saveDocumentEditor(true).catch(error => showToast(error.message || '归档失败')); break;
     case 'document-reanalyze': void reanalyzeDocument().catch(error => showToast(error.message || '分析失败')); break;
     case 'document-reanalyze-confirm': void reanalyzeDocument(true).catch(error => showToast(error.message || '分析失败')); break;
     case 'document-task-add': updateDocumentDraft('add'); break;
+    case 'document-task-merge': mergeSelectedDocumentTasks(); break;
     case 'document-task-remove': updateDocumentDraft('remove', el.dataset.index); break;
     case 'document-original': void exportDocumentOriginal().catch(error => showToast(error.message || '原文件导出失败')); break;
     case 'document-reparse': void reparseSavedDocument().catch(error => showToast(error.message || '重新解析失败')); break;

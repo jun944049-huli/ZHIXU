@@ -6,7 +6,7 @@ import { createContext, runInContext } from 'node:vm';
 import { webcrypto } from 'node:crypto';
 
 function workbench() {
-  const fields: Record<string, { value: string; checkValidity(): boolean }> = {};
+  const fields: Record<string, { value: string; checked?: boolean; checkValidity(): boolean }> = {};
   const saved: unknown[] = [];
   const preferences: Record<string, string> = {};
   const context = createContext({
@@ -22,7 +22,7 @@ function workbench() {
     persistWorkbench: async () => { saved.push(runInContext('JSON.stringify(DB)', context)); }
   });
   for (const file of ['data.js', 'shared.js', 'chat-format.js', 'views-chat.js', 'views-project.js', 'views-output.js',
-    'operations.js', 'work-sync.js', 'integrations.js', 'features.js', 'analytics.js', 'documents.js', 'workspace.js', 'plugins.js']) {
+    'operations.js', 'work-sync.js', 'integrations.js', 'features.js', 'analytics.js', 'documents.js', 'document-workflow.js', 'workspace.js', 'plugins.js']) {
     runInContext(readFileSync(resolve('prototype', file), 'utf8'), context, { filename: file });
   }
   runInContext('initializeIntegrations(); initializeFeatures();', context);
@@ -598,4 +598,127 @@ test('document application is idempotent, edits live tasks and never revives del
   await w.run("applyDocumentToProject(documentById('doc-qa'),'p2')");
   assert.equal(w.run('allWorkbenchTasks().length'), before);
   assert.equal(w.run("documentById('doc-qa').content"), '完成设备验收');
+});
+
+async function seedDocumentWorkflow(w: ReturnType<typeof workbench>) {
+  w.run(`DB.tasks={must:[],should:[],could:[]}; DB.taskCalendar={}; DB.projectDetails.p1.milestones=[];
+    DB.documents=[{id:'workflow',title:'执行清单.docx',content:'完成门窗维修\\n完成灯具维修\\n完成设备部署',
+      projectId:null,analysis:{summary:'维修与部署',mode:'测试模型',model:'workflow-model',tasks:[
+        {id:'a',title:'完成门窗维修',details:'核对门锁',evidence:'完成门窗维修',due:'',assignee:'',priority:'P2',estimateHours:0,selected:true},
+        {id:'b',title:'完成灯具维修',details:'核对线路',evidence:'完成灯具维修',due:'',assignee:'',priority:'P2',estimateHours:0,selected:true},
+        {id:'c',title:'完成设备部署',details:'安装设备',evidence:'完成设备部署',due:'',assignee:'',priority:'P2',estimateHours:0,selected:true}
+      ]}}];`);
+  await w.run("applyDocumentToProject(documentById('workflow'),'p1')");
+  w.run(`window.ids=documentById('workflow').analysis.tasks.map(task=>task.taskId);
+    setWorkTaskStatus(taskLocation(window.ids[0]).task,'done');
+    DB.projectDetails.p1.milestones=[{id:'repair',name:'维修',taskIds:window.ids.slice(0,2),status:'open'}];
+    DB.waiting=[{id:'wait',taskId:window.ids[1],project:'p1'}];
+    DB.timeEntries=[{id:'time',taskId:window.ids[1],seconds:10}];
+    reconcileProjectWork(['p1']);`);
+}
+
+test('document task merge keeps original completion and progress and completes every linked part together', async () => {
+  const w = workbench(); await seedDocumentWorkflow(w);
+  const before = w.run("projectById('p1').progress");
+  w.run(`{
+    const doc=documentById('workflow');
+    const combined=combineDocumentTasks(doc.analysis.tasks.slice(0,2),'完成维修交付');
+    doc.analysis.tasks=[combined,doc.analysis.tasks[2]];
+  }`);
+  await w.run("applyDocumentToProject(documentById('workflow'),'p1')");
+  assert.equal(w.run('allWorkbenchTasks().length'), 2);
+  assert.equal(w.run("projectById('p1').progress"), before);
+  assert.equal(w.run("taskLocation(window.ids[0]).task.workItems[0].done"), true);
+  assert.equal(w.run("taskLocation(window.ids[0]).task.workItems[1].done"), false);
+  assert.match(w.run("taskLocation(window.ids[0]).task.details"), /核对门锁[\s\S]*核对线路/);
+  assert.equal(w.run("DB.waiting[0].taskId===window.ids[0] && DB.timeEntries[0].taskId===window.ids[0]"), true);
+  assert.equal(w.run('DB.projectDetails.p1.milestones[0].taskIds.length'), 1);
+  w.run('toggleTask(window.ids[0])');
+  assert.equal(w.run('taskLocation(window.ids[0]).task.workItems.every(task=>task.done)'), true);
+  assert.equal(w.run("DB.projectDetails.p1.milestones[0].status"), 'done');
+  assert.equal(w.run("DB.waiting[0].status"), 'done');
+  assert.equal(w.run("documentById('workflow').analysis.tasks[0].done"), true);
+  assert.equal(w.run("projectById('p1').progress"), 67);
+  w.run('toggleTask(window.ids[0])');
+  assert.equal(w.run('taskLocation(window.ids[0]).task.workItems.every(task=>!task.done)'), true);
+});
+
+test('merge rejects unrelated milestones, owners, dates and foreign document records without mutations', async () => {
+  const w = workbench(); await seedDocumentWorkflow(w);
+  assert.throws(() => w.run("combineDocumentTasks(documentById('workflow').analysis.tasks,'全部')"), /里程碑/);
+  w.run("taskLocation(window.ids[0]).task.assignee='甲'; taskLocation(window.ids[1]).task.assignee='乙'");
+  assert.throws(() => w.run("validateDocumentMerge(window.ids.slice(0,2))"), /负责人/);
+  w.run("taskLocation(window.ids[1]).task.assignee='甲'; taskLocation(window.ids[0]).task.due='2030-01-01'; taskLocation(window.ids[1]).task.due='2030-01-02'");
+  assert.throws(() => w.run("validateDocumentMerge(window.ids.slice(0,2))"), /截止日期/);
+  w.run(`taskLocation(window.ids[1]).task.due='2030-01-01';
+    documentById('workflow').analysis.tasks=[combineDocumentTasks(documentById('workflow').analysis.tasks.slice(0,2),'维修')];
+    taskLocation(window.ids[1]).task.sourceDocumentId='foreign'`);
+  const snapshot = w.run('JSON.stringify(DB)');
+  await assert.rejects(w.run("applyDocumentToProject(documentById('workflow'),'p1')"), /此附件/);
+  assert.equal(w.run('JSON.stringify(DB)'), snapshot);
+});
+
+test('reanalysis groups existing tasks by explicit IDs, keeps other work and rejects duplicate/unknown IDs', async () => {
+  const w = workbench(); await seedDocumentWorkflow(w);
+  w.run(`window.result={summary:'精简',tasks:[{title:'维修交付',details:'完成维修验收',sourceTaskIds:window.ids.slice(0,2),
+    evidence:'完成门窗维修',assignee:'',due:'',priority:'P2',estimateHours:0}]};
+    window.prepared=prepareDocumentAnalysis(window.result,documentById('workflow').analysis.tasks);`);
+  assert.equal(w.run('window.prepared.tasks.length'), 2);
+  assert.equal(w.run('window.prepared.tasks[0].mergeTaskIds.length'), 1);
+  assert.match(w.run('window.prepared.tasks[0].details'), /核对线路/);
+  w.run("window.result.tasks[0].sourceTaskIds=['unknown']");
+  assert.throws(() => w.run("prepareDocumentAnalysis(window.result,documentById('workflow').analysis.tasks)"), /不属于/);
+  w.run('window.result.tasks[0].sourceTaskIds=window.ids.slice(0,2);window.result.tasks.push(window.result.tasks[0])');
+  assert.throws(() => w.run("prepareDocumentAnalysis(window.result,documentById('workflow').analysis.tasks)"), /重复分组/);
+});
+
+function documentEditorFields(w: ReturnType<typeof workbench>, project = 'p1') {
+  w.run("state.documentId='workflow'; state.documentDraft=JSON.parse(JSON.stringify(documentById('workflow').analysis)); state.view='project'");
+  const tasks = JSON.parse(w.run('JSON.stringify(state.documentDraft.tasks)'));
+  for (const [key, value] of Object.entries({ project, 'project-name': '待确认新项目', summary: '简短分析摘要',
+    'edit-instructions': '按交付物合并', engine: 'local' })) {
+    w.fields['document-' + key] = { value, checkValidity: () => true };
+  }
+  tasks.forEach((task: any, index: number) => {
+    for (const [key, value] of Object.entries({ title: task.title, details: task.details || '', owner: task.assignee,
+      due: task.due, priority: task.priority, hours: String(task.estimateHours), selected: '' })) {
+      w.fields[`draft-${key}-${index}`] = { value: String(value), checked: true, checkValidity: () => true };
+    }
+  });
+}
+
+test('saving returns to chat with a single durable summary, detail route and editable task details', async () => {
+  const w = workbench(); await seedDocumentWorkflow(w); documentEditorFields(w);
+  await w.run('saveDocumentEditor()');
+  assert.equal(w.run('state.view'), 'chat');
+  assert.match(w.run("state.chatMessages.at(-1).text"), /简短分析摘要/);
+  assert.match(w.run("renderChatMessage(state.chatMessages.at(-1))"), /document-chat-details/);
+  assert.equal(w.run('state.chatMessages.at(-1).model'), 'workflow-model');
+  assert.equal(JSON.parse(w.preferences['jw-chat-history']).at(-1).documentId, 'workflow');
+  documentEditorFields(w);
+  w.fields['draft-details-0'].value = '更新维修详细清单';
+  await w.run('saveDocumentEditor()');
+  assert.equal(w.run("state.chatMessages.filter(message=>message.documentId==='workflow').length"), 1);
+  assert.equal(w.run("taskLocation(window.ids[0]).task.details"), '更新维修详细清单');
+  w.fields['modal-root'] = { value: '', checkValidity: () => true };
+  w.run("openDocumentChatDetails('workflow')");
+  assert.equal(w.run('state.view'), 'project');
+  assert.equal(w.run('state.projectId'), 'p1');
+});
+
+test('failed saves roll back document/task/project/chat changes and new project drafts wait for confirmation', async () => {
+  const w = workbench(); await seedDocumentWorkflow(w); documentEditorFields(w);
+  const before = w.run('JSON.stringify(DB)');
+  w.run("persistWorkbench=async()=>{throw new Error('磁盘写入失败')}");
+  await assert.rejects(w.run('saveDocumentEditor()'), /磁盘写入失败/);
+  assert.equal(w.run('JSON.stringify(DB)'), before);
+  assert.equal(w.run('state.view'), 'project');
+  assert.equal(w.run("state.chatMessages.some(message=>message.documentId==='workflow')"), false);
+  const fresh = workbench(); await seedDocumentWorkflow(fresh);
+  fresh.run("documentById('workflow').projectId=null");
+  documentEditorFields(fresh, 'new');
+  const count = fresh.run('DB.projects.length');
+  await fresh.run('saveDocumentEditor()');
+  assert.equal(fresh.run('DB.projects.length'), count);
+  assert.match(fresh.run('state.chatMessages.at(-1).text'), /待确认/);
 });

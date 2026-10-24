@@ -521,6 +521,19 @@ summary { cursor: pointer; }
 .chat-work-details { margin-top: 12px; }
 .chat-work-details > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .chat-work-details .action-items { max-height: 320px; overflow: auto; }
+.document-merge-toolbar { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+.document-merge-toolbar .input { flex: 1; min-width: 0; }
+.document-merge-toolbar .btn { flex-shrink: 0; }
+.document-task-row > .field { margin-top: 12px; }
+.document-task-row .feature-textarea { min-height: 80px; }
+.document-choice { white-space: nowrap; }
+.chat-document-result { margin-top: 12px; max-width: 100%; }
+.chat-document-result ul { margin: 0 0 12px; padding-left: 20px; line-height: 1.8; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .document-merge-toolbar { flex-wrap: wrap; }
+  .document-merge-toolbar .input { flex-basis: 100%; }
+  .document-task-title { flex-wrap: wrap; }
+}
 .plugin-entry { border-top: 1px solid var(--line, #e4e6eb); padding-top: 24px; margin-top: 32px; }
 .plugin-empty { min-height: 260px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; border: 1px dashed var(--line, #e4e6eb); border-radius: 8px; padding: 32px 20px; text-align: center; }
 .plugin-empty h3, .plugin-empty p { margin: 0; }

@@ -29,6 +29,15 @@ async function launch() {
   });
 }
 const close = () => page.locator('#modal-root [data-action="close-modal"]').first().click();
+const settle = () => page.evaluate(() => Promise.all(document.getAnimations()
+  .filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity)
+  .map(animation => animation.finished.catch(() => {}))));
+async function details(id) {
+  assert.equal(await page.locator('#modal-root .modal').count(), 0, 'save/analysis should close the editor');
+  assert.equal(await page.evaluate(() => state.view), 'chat');
+  await page.locator(`[data-action="document-chat-details"][data-id="${id}"]`).click();
+  await page.locator('.document-editor').waitFor();
+}
 async function upload(names, project = '', instructions = '提取交付物；不要推测日期和负责人。') {
   await page.locator('.nav [data-view="chat"]').click();
   await page.locator('[data-action="chat-attachment"]').click();
@@ -37,6 +46,11 @@ async function upload(names, project = '', instructions = '提取交付物；不
   await page.locator('#document-instructions').fill(instructions);
   await page.locator('[data-action="document-import"]').click();
   await page.waitForFunction(() => !state.documentImportBusy, null, { timeout: 210000 });
+  if (!await page.locator('#modal-root .modal').count()) {
+    const id = await page.evaluate(name => DB.documents.find(doc => doc.title === name)?.id, names[0]);
+    if (names.length === 1) await details(id);
+    else await page.locator('[data-action="document-library"]').click();
+  }
 }
 
 try {
@@ -56,14 +70,18 @@ try {
   await page.locator('#document-project').selectOption('p2');
   await page.locator('[data-action="document-apply"]').click();
   await page.waitForFunction(id => documentById(id).projectId === 'p2', wordId);
+  await page.waitForFunction(() => !state.documentSaving);
+  await details(wordId);
   await page.locator('[data-action="document-save"]').click();
   await page.waitForFunction(() => !state.documentSaving);
   assert.equal(await page.evaluate(() => allWorkbenchTasks().length), initialTasks + 6);
   assert.equal(await page.evaluate(() => allWorkbenchTasks().find(task => task.title === '修改后的附件验收任务').project), 'p2');
+  await details(wordId);
   await page.locator('[data-action="document-reanalyze"]').click();
   assert.match(await page.locator('#modal-root').innerText(), /已有任务会保留/);
   await page.locator('[data-action="document-reanalyze-confirm"]').click();
-  await page.locator('.document-editor').waitFor();
+  await page.waitForFunction(() => !state.documentAnalyzing);
+  await details(wordId);
   assert.equal(await page.evaluate(() => allWorkbenchTasks().length), initialTasks + 6);
   await page.locator('[data-action="document-original"]').click();
   await page.waitForFunction(() => document.querySelector('#toast-root').textContent.includes('原文件已导出'));
@@ -112,7 +130,7 @@ try {
   await page.locator('[data-action="document-save"]').click();
   await page.waitForFunction(() => !state.documentSaving);
   assert.equal(await page.evaluate(() => DB.projects.length), initialProjects);
-  await close();
+  assert.equal(await page.locator('#modal-root .modal').count(), 0);
   await page.evaluate(() => persistWorkbench());
   await page.reload();
   await page.waitForFunction(() => typeof workbenchReady !== 'undefined' && workbenchReady);
@@ -125,14 +143,17 @@ try {
   await page.waitForFunction(() => DB.projects.some(project => project.name === '远山巡检验收'));
   assert.equal(await page.evaluate(() => DB.projects.length), initialProjects + 1);
   assert.equal(await page.evaluate(() => allWorkbenchTasks().length), initialTasks + 8);
+  await page.waitForFunction(() => !state.documentSaving);
+  await details(freshId);
   await page.locator('#draft-title-0').fill('保存修改后的设备清单');
   await page.locator('[data-action="document-save"]').click();
   await page.waitForFunction(() => !state.documentSaving);
   assert.equal(await page.evaluate(() => allWorkbenchTasks().some(task => task.title === '保存修改后的设备清单')), true);
+  await details(freshId);
   await page.locator('[data-action="document-apply"]').click();
   await page.waitForFunction(() => !state.documentSaving);
   assert.equal(await page.evaluate(() => allWorkbenchTasks().length), initialTasks + 8);
-  await close();
+  assert.equal(await page.locator('#modal-root .modal').count(), 0);
   await upload(['新项目资料.md']);
   assert.equal(await page.evaluate(() => DB.documents.filter(doc => !doc.parseError).length), 5);
   assert.equal(await page.evaluate(() => allWorkbenchTasks().length), initialTasks + 8);
@@ -166,7 +187,8 @@ try {
   assert.equal(await page.evaluate(() => DB.documents.filter(doc => !doc.parseError).length), 5);
   await page.locator('[data-action="document-import"]').click();
   await page.waitForFunction(() => !state.documentImportBusy);
-  await page.locator('.document-editor').waitFor();
+  const retryId = await page.evaluate(() => DB.documents.find(doc => doc.title === '临时保存故障.md').id);
+  await details(retryId);
   assert.equal(await page.evaluate(() => DB.documents.filter(doc => !doc.parseError).length), 6);
   await close();
   await upload(['大附件49MB.pdf']);
@@ -182,12 +204,57 @@ try {
   assert.match(await page.locator('#document-import-results').innerText(), /超过 50 MB/);
   assert.equal(await page.locator('#text-file').evaluate(input => input.files.length), 1);
   assert.equal(await page.evaluate(() => DB.documents.length), 8);
+  await close();
+  await page.locator(`[data-action="document-chat-details"][data-id="${wordId}"]`).click();
+  await page.locator('#draft-merge-0').check();
+  await page.locator('#draft-merge-1').check();
+  await page.locator('#document-merge-title').fill('附件需求与验收交付');
+  await page.locator('[data-action="document-task-merge"]').click();
+  assert.equal(await page.locator('.document-task-row').count(), 1);
+  assert.match(await page.locator('#draft-details-0').inputValue(), /提交验收清单/);
+  const beforeMerge = await page.evaluate(() => allWorkbenchTasks().length);
+  await page.locator('#draft-details-0').fill((await page.locator('#draft-details-0').inputValue()) + '\n检查最终验收材料');
+  await settle();
+  await page.screenshot({ path: join(evidence, 'document-workflow-editor.png') });
+  await page.locator('[data-action="document-apply"]').click();
+  await page.waitForFunction(() => !state.documentSaving);
+  assert.equal(await page.locator('#modal-root .modal').count(), 0);
+  assert.equal(await page.evaluate(() => allWorkbenchTasks().length), beforeMerge - 1);
+  assert.match(await page.locator('#chat-thread').innerText(), /附件需求与验收交付/);
+  const mergedId = await page.evaluate(id => documentById(id).analysis.tasks[0].taskId, wordId);
+  await details(wordId);
+  assert.match(await page.locator('#draft-details-0').inputValue(), /检查最终验收材料/);
+  await close();
+  await page.evaluate(id => openTaskEditor(id), mergedId);
+  assert.match(await page.locator('#task-details').inputValue(), /检查最终验收材料/);
+  await page.locator('#task-status').selectOption('done');
+  await page.locator('[data-action="task-save"]').click();
+  await page.waitForFunction(() => !document.querySelector('#modal-root .modal'));
+  assert.equal(await page.evaluate(id => taskLocation(id).task.workItems.every(item => item.done), mergedId), true);
+  assert.equal(await page.evaluate(id => documentById(id).analysis.tasks[0].done, wordId), true);
+  await page.locator('.nav [data-view="chat"]').click();
+  await settle();
+  await page.screenshot({ path: join(evidence, 'document-workflow-chat.png') });
+  await page.setViewportSize({ width: 744, height: 906 });
+  await page.locator(`[data-action="document-chat-details"][data-id="${wordId}"]`).click();
+  const overflow = await page.locator('.document-editor').evaluate(modal => modal.scrollWidth > modal.clientWidth + 1);
+  assert.equal(overflow, false);
+  await settle();
+  await page.screenshot({ path: join(evidence, 'document-workflow-narrow.png') });
+  await close();
+  await page.evaluate(() => persistWorkbench());
+  await page.reload();
+  await page.waitForFunction(() => typeof workbenchReady !== 'undefined' && workbenchReady);
+  assert.equal(await page.evaluate(id => taskLocation(id).task.workItems.every(item => item.done), mergedId), true);
+  assert.equal(await page.evaluate(id => state.chatMessages.filter(message => message.documentId === id).length, wordId), 1);
   assert.deepEqual(errors, []);
   const result = { passed: true, formats: ['DOCX', 'XLSX', 'PDF', 'PPTX', 'Markdown'],
     documents: 8, parsedDocuments: 7, largePDFBytes: readFileSync(join(files, '大附件49MB.pdf')).length,
     sourcePreservedOnParseFailure: true, reparseAvailable: true, over50MBRejectedAndSelectionRetained: true,
     newProjectsAfterConfirmation: 1, createdTasks: 8,
     failedSelectionRetained: true, partialBatchIdempotent: true, transientFailureRetried: true,
+    saveReturnsToChat: true, detailNavigation: true, mergedOriginalStatesPreserved: true,
+    mergedCompletionAndRestartVerified: true, narrowLayout: true,
     exported: readdirSync(exports), profile };
   writeFileSync(join(evidence, 'document-audit.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));

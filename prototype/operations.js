@@ -21,7 +21,12 @@ function taskWorkProgress(task) {
   return task.done ? 100 : Math.min(99, Math.max(0, Number(task.progress) || 0));
 }
 
+function taskWorkValues(task) {
+  return task.workItems?.length ? task.workItems.map(taskWorkProgress) : [taskWorkProgress(task)];
+}
+
 function setWorkTaskStatus(task, status, progress) {
+  for (const item of task.workItems || []) setWorkTaskStatus(item, status, progress);
   const previousCompletion = task.done && task.completedAt ? new Date(task.completedAt) : null;
   task.done = status === 'done';
   task.blocked = status === 'blocked';
@@ -58,14 +63,15 @@ function reconcileProjectWork(projectIds) {
       const ids = milestoneTaskIds(id, milestone);
       if (!ids.length) continue;
       const linked = ids.map(taskId => tasks.find(task => task.id === taskId));
-      milestone.progress = Math.round(linked.reduce((sum, task) => sum + (task ? taskWorkProgress(task) : 0), 0) / ids.length);
+      const linkedValues = linked.flatMap(task => task ? taskWorkValues(task) : [0]);
+      milestone.progress = Math.round(linkedValues.reduce((sum, value) => sum + value, 0) / linkedValues.length);
       const done = linked.every(task => task?.done);
       milestone.status = done ? 'done' : linked.some(task => task && (task.blocked || isTaskOverdue(task))) ? 'risk' : 'open';
       milestone.completedAt = done ? milestone.completedAt || new Date().toISOString() : null;
     }
     project.open = tasks.filter(task => !task.done).length;
     project.progressSource = tasks.length ? 'tasks' : 'milestones';
-    const values = tasks.length ? tasks.map(taskWorkProgress) : milestones.map(item => item.status === 'done' ? 100 : item.progress || 0);
+    const values = tasks.length ? tasks.flatMap(taskWorkValues) : milestones.map(item => item.status === 'done' ? 100 : item.progress || 0);
     const complete = values.length > 0 && tasks.every(task => task.done) && milestones.every(item => item.status === 'done');
     project.progress = values.length ? Math.min(complete ? 100 : 99, Math.round(values.reduce((a, b) => a + b, 0) / values.length)) : 0;
     project.status = complete ? '已完成' : tasks.some(task => task.done || task.blocked || task.status === '进行中' || taskWorkProgress(task) > 0) ||

@@ -15,7 +15,8 @@ const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 const close = () => page.locator('#modal-root [data-action="close-modal"]').first().click();
 async function upload(names) {
-  await page.locator('[data-action="workspace-upload"]').click();
+  await page.locator('.nav [data-view="chat"]').click();
+  await page.locator('[data-action="chat-attachment"]').click();
   await page.locator('#text-file').setInputFiles(names.map(name => join(files, name)));
   await page.locator('#document-engine').selectOption('local');
   await page.locator('[data-action="document-import"]').click();
@@ -31,7 +32,8 @@ try {
   assert.equal(await page.evaluate(() => DB.documents.filter(doc => !doc.parseError).length), 4);
   assert.equal(await page.evaluate(() => DB.documents.filter(doc => doc.projectId === 'p1').length), 3);
   const id = await page.evaluate(() => DB.documents.find(doc => doc.title.endsWith('.docx')).id);
-  await page.locator(`#modal-root [data-action="document-open"][data-id="${id}"]`).click();
+  assert.equal(await page.locator('#modal-root .modal').count(), 0);
+  await page.locator(`[data-action="document-chat-details"][data-id="${id}"]`).click();
   const downloading = page.waitForEvent('download');
   await page.locator('[data-action="document-original"]').click();
   const download = await downloading;
@@ -52,7 +54,7 @@ try {
   await upload(['大附件49MB.pdf']);
   assert.equal(await page.evaluate(() => DB.documents.find(doc => doc.title === '大附件49MB.pdf').parseError), '');
   assert.match(await page.evaluate(() => DB.documents.find(doc => doc.title === '大附件49MB.pdf').content), /large document review/);
-  await close();
+  assert.equal(await page.locator('#modal-root .modal').count(), 0);
   await page.evaluate(() => persistWorkbench());
   await page.reload();
   await page.waitForFunction(() => typeof workbenchReady !== 'undefined' && workbenchReady);

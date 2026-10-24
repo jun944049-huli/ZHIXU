@@ -15,6 +15,7 @@ export async function chat(value: unknown): Promise<ChatResult> {
 {"type":"work_update","projectId":"实际项目ID","tasks":[{"taskId":"实际任务ID","status":"done"}],"milestones":[{"milestoneId":"实际里程碑ID","status":"done","taskIds":["关联的实际任务ID"]}]}
 work_update 按项目合并。若同名任务、工作范围或指代有歧义，先追问或填 requiresConfirmation:true，禁止自动选择并同步。任务状态 todo/doing/blocked/done，只有明确百分比才填 progress。上下文 tasks/milestones 是唯一可更新对象，禁止编造ID。
 里程碑只有用户明确说明该节点状态，或给定的全部关联任务已完成时才能完成。未建立关联时，只有明确同一工作范围才可用 taskIds 关联任务。部分维修完成不能将设备部署、联调、验收一并完成；未知部分保持原状，不必反复追问无关部分。
+任务的details包含详细执行清单。用户明确整个任务完成时同步整项；仅完成清单的一部分时，不要把整项标记完成，应说明尚余部分并在范围有歧义时请求确认。
 项目整体进度、下一节点、逾期、今日安排、报表由系统按实际任务和里程碑联动计算，不要再附加 progress 动作覆盖计算结果。
 {"type":"task","projectId":null,"title":"任务标题","due":"","date":"","assignee":"","estimateHours":0,"priority":"P2"}
 {"type":"progress","projectId":"实际项目ID","progress":50}

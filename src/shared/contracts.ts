@@ -137,6 +137,8 @@ export const documentAnalysisSchema = z.object({
   projectName: z.string().max(150),
   tasks: z.array(z.object({
     title: z.string().trim().min(1).max(200),
+    details: z.string().max(12000).default(''),
+    sourceTaskIds: z.array(z.string().min(1).max(150)).max(150).default([]),
     assignee: z.string().max(100),
     due: z.union([z.iso.date(), z.literal('')]),
     priority: z.enum(['P0', 'P1', 'P2', 'P3', 'P4']),
@@ -155,6 +157,11 @@ export const analyzeDocumentSchema = z.object({
   today: z.iso.date(),
   instructions: z.string().max(4000),
   projects: z.array(z.object({ id: z.string().max(150), name: z.string().max(150) })).max(500),
+  existingTasks: z.array(z.object({
+    id: z.string().min(1).max(150), title: z.string().max(500),
+    details: z.string().max(12000).default(''), evidence: z.string().max(1000).default(''),
+    assignee: z.string().max(100).default(''), due: z.string().max(40).default('')
+  })).max(150).default([]),
   provider: polishSchema.omit({ text: true, tone: true }).optional()
 });
 

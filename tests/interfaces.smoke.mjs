@@ -140,11 +140,11 @@ try {
   await page.locator('[data-action="document-upload"]').click();
   await page.locator('#text-file').setInputFiles({ name: '核查文档.md', mimeType: 'text/markdown', buffer: Buffer.from('# 真实文档\n正文 <script>不可执行</script>') });
   await page.locator('[data-action="document-import"]').click();
-  await page.waitForFunction(() => DB.documents.some(d => d.title === '核查文档.md'));
-  await page.locator('.document-editor').waitFor();
-  await close();
+  await page.waitForFunction(() => !state.documentImportBusy);
+  assert.equal(await page.locator('#modal-root .modal').count(), 0);
+  assert.equal(await page.evaluate(() => state.view), 'chat');
   const documentId = await page.evaluate(() => DB.documents[0].id);
-  await page.locator(`[data-action="document-open"][data-id="${documentId}"]`).click();
+  await page.locator(`[data-action="document-chat-details"][data-id="${documentId}"]`).click();
   await page.locator('.document-source summary').click();
   assert.match(await page.locator('.document-content').innerText(), /真实文档/);
   assert.equal(await page.locator('.document-content script').count(), 0);

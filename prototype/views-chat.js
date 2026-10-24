@@ -141,6 +141,10 @@ function renderChatMessage(m) {
           `<details class="chat-work-details"><summary>查看同步详情</summary>${renderChatActionCard(m.actionCard)}</details>` :
           renderChatActionCard(m.actionCard) : ''}
         ${m.retryOf ? `<button class="btn btn-sm mt-8" data-action="chat-retry" data-id="${esc(m.retryOf)}">${icon('refresh', 12)} 重试模型请求</button>` : ''}
+        ${m.documentId && documentById(m.documentId) ? `<div class="chat-document-result">
+          <ul>${(m.documentTasks || []).map(task => `<li>${esc(task.title)}</li>`).join('')}</ul>
+          <button class="btn btn-sm" data-action="document-chat-details" data-id="${esc(m.documentId)}">${icon('file', 12)} 详细 ${icon('arrowRight', 12)}</button>
+        </div>` : ''}
         ${m.quick ? renderChatQuick(m.quick) : ''}
         <div class="chat-meta">${meta}</div>
       </div>
@@ -438,7 +442,8 @@ function modelChatContext() {
   const tasks = allWorkbenchTasks().filter(relevant).slice(-150).map(task => ({
     id: task.id, title: task.title, projectId: task.project || null, done: !!task.done,
     status: workTaskStatus(task), progress: taskWorkProgress(task),
-    due: task.due, date: taskDates.get(task.id), assignee: task.assignee || '', estimate: task.estimate, priority: task.priority
+    due: task.due, date: taskDates.get(task.id), assignee: task.assignee || '', estimate: task.estimate, priority: task.priority,
+    details: String(task.details || '').slice(0, 2000)
   }));
   const projects = DB.projects.filter(project => !selected || project.id === selected).slice(0, 100)
     .map(project => ({ id: project.id, name: project.name, progress: project.progress,

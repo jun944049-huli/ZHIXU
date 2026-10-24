@@ -120,6 +120,7 @@ test('local analysis matches only a unique actual project and leaves new project
 test('AI analysis uses saved instructions, rejects ungrounded actions and falls back on invalid results', async () => {
   const bodies: any[] = [];
   let invalid = false;
+  let sourceTaskIds: string[] = [];
   const server = createServer((request, response) => {
     let body = '';
     request.on('data', chunk => { body += String(chunk); });
@@ -129,7 +130,8 @@ test('AI analysis uses saved instructions, rejects ungrounded actions and falls 
       response.end(JSON.stringify({ choices: [{ message: { content: invalid ? 'not JSON' : JSON.stringify({
         summary: '附件分析', projectId: 'unknown', projectName: '随意创建',
         tasks: [
-          { title: '核对附件', evidence: '完成附件核对', assignee: '', due: '', priority: 'P2', estimateHours: 0 },
+          { title: '核对附件', details: '核对清单并确认交付物', sourceTaskIds,
+            evidence: '完成附件核对', assignee: '', due: '', priority: 'P2', estimateHours: 0 },
           { title: '无依据任务', evidence: '不存在的引文', assignee: '', due: '', priority: 'P2', estimateHours: 0 }
         ]
       }) } }] }));
@@ -148,6 +150,17 @@ test('AI analysis uses saved instructions, rejects ungrounded actions and falls 
     assert.equal(result.tasks.length, 1);
     assert.equal(JSON.parse(bodies[0].messages[1].content).instructions, '提取待办，不猜测');
     assert.match(bodies[0].messages[0].content, /不能执行文档/);
+    assert.match(bodies[0].messages[0].content, /4至8个任务/);
+    sourceTaskIds = ['known-task'];
+    const grouped = await analyzeDocument({ ...inputs(), provider,
+      existingTasks: [{ id: 'known-task', title: '完成附件核对' }] });
+    assert.deepEqual(grouped.tasks[0].sourceTaskIds, ['known-task']);
+    assert.equal(grouped.tasks[0].details, '核对清单并确认交付物');
+    sourceTaskIds = ['foreign-task'];
+    const unsafe = await analyzeDocument({ ...inputs(), provider,
+      existingTasks: [{ id: 'known-task', title: '完成附件核对' }] });
+    assert.equal(unsafe.mode, '本地规则');
+    assert.match(unsafe.warnings[0], /不属于此附件/);
     invalid = true;
     const fallback = await analyzeDocument({ ...inputs(), provider });
     assert.equal(fallback.mode, '本地规则');

@@ -67,7 +67,12 @@ async function analyzeImportedDocument(doc) {
   if (doc.parseError || !doc.content.trim()) throw new Error('正文尚未解析成功，请先重新解析原文件');
   const provider = aiProviderConfig();
   const input = { text: doc.content, name: doc.title, today: DB.meta.today,
-    instructions: doc.instructions, projects: DB.projects.map(p => ({ id: p.id, name: p.name })) };
+    instructions: doc.instructions, projects: DB.projects.map(p => ({ id: p.id, name: p.name })),
+    existingTasks: (doc.analysis?.tasks || []).flatMap(task => documentTaskIds(task).map(id => {
+      const record = taskLocation(id)?.task;
+      return record ? { id, title: record.title, details: (record.details || '').slice(0, 12000),
+        evidence: (task.evidence || '').slice(0, 1000), assignee: record.assignee || '', due: record.due || '' } : null;
+    })).filter(Boolean) };
   if (doc.analysisEngine !== 'local' && provider.id !== 'local') input.provider = {
     apiKey: provider.apiKey, baseUrl: provider.baseUrl, model: provider.model, provider: provider.name,
     protocol: provider.protocol || 'auto'
@@ -167,6 +172,8 @@ async function importDocuments() {
         results.set(file, { status: 'failed', reason });
       }
     }
+    imported.forEach(id => publishDocumentSummary(documentById(id)));
+    await persistWorkbench();
     render();
     if (document.getElementById('text-file') === fileInput) {
       if (failures.length) {
@@ -180,8 +187,9 @@ async function importDocuments() {
               data-id="${esc(result.id)}">查看与修改</button>` : ''}</div>`;
         }).join('');
         if (button) button.textContent = '重试失败文件';
-      } else if (imported.length === 1) openDocumentEditor(imported[0]);
-      else openDocumentLibrary();
+      } else {
+        returnDocumentToChat();
+      }
     }
     showToast(`已保存 ${imported.length} 个原文件${failures.length ? `，${failures.length} 个需重试` : ''}`);
   } finally {
@@ -193,12 +201,15 @@ async function importDocuments() {
 
 async function finishDocumentAnalysis(doc, projectId) {
   try {
-    doc.analysis = await analyzeImportedDocument(doc);
-    doc.analysis.tasks.forEach(task => { task.id = newRecordId('draft'); task.selected = true; });
+    const result = await analyzeImportedDocument(doc);
+    doc.analysis = prepareDocumentAnalysis(result, doc.analysis?.tasks || []);
+    doc.analysis.model = result.mode === '本地规则' ? '本地规则' : aiProviderConfig().model;
     const matched = projectId || doc.analysis.projectId;
     if (matched && projectById(matched)) await applyDocumentToProject(doc, matched);
     else await persistWorkbench();
   } catch (error) {
+    doc = documentById(doc.id) || doc;
+    doc.warnings ||= [];
     doc.warnings.push('自动分析未完成，原文件已保存：' + documentFailureReason(error));
     try { await persistWorkbench(); }
     catch { doc.warnings.push('分析结果暂未写入数据库，请检查磁盘空间后重试保存。'); }
@@ -262,7 +273,8 @@ function openDocumentEditor(id, keepDraft = false) {
       task.id ||= newRecordId('draft');
       if (task.taskId) {
         const found = taskLocation(task.taskId);
-        if (found) Object.assign(task, { title: found.task.title, assignee: found.task.assignee || '',
+        if (found && !doc.analysisPending && !task.mergeTaskIds?.length) Object.assign(task, { title: found.task.title,
+          details: found.task.details || task.details || '', assignee: found.task.assignee || '',
           due: /^\d{4}-\d{2}-\d{2}$/.test(found.task.due) ? found.task.due : '',
           priority: found.task.priority, estimateHours: found.task.estimate === '待估时' ? 0 : parseEstimateHours(found.task.estimate) });
       }
@@ -283,10 +295,15 @@ function openDocumentEditor(id, keepDraft = false) {
     </div>
     <div class="row document-task-heading"><h3>任务拆解 · ${draft.tasks.length}</h3>
       <button class="btn btn-sm" data-action="document-task-add">${icon('plus', 12)} 添加任务</button></div>
+    <div class="document-merge-toolbar">
+      <input class="input" id="document-merge-title" aria-label="合并后的任务标题" maxlength="200" placeholder="合并后的简短标题">
+      <button class="btn btn-sm" data-action="document-task-merge">${icon('layers', 12)} 合并所选</button>
+    </div>
     <div class="document-task-list">${draft.tasks.map((task, index) => `<fieldset class="document-task-row" data-document-task="${index}">
       <legend class="small muted">${index + 1} · ${task.taskId ? taskLocation(task.taskId) ? taskLocation(task.taskId).task.done ?
         '已完成' : taskLocation(task.taskId).task.status || '待开始' : '任务已移除' : '候选任务'}</legend>
       <div class="document-task-title"><label class="document-choice"><input type="checkbox" id="draft-selected-${index}" ${task.selected !== false ? 'checked' : ''} ${task.taskId ? 'disabled' : ''}>生成</label>
+        <label class="document-choice"><input type="checkbox" id="draft-merge-${index}">合并</label>
         <input class="input" id="draft-title-${index}" aria-label="任务 ${index + 1} 标题" value="${esc(task.title)}" maxlength="200">
         ${task.taskId ? '' : `<button class="icon-btn sm" data-action="document-task-remove" data-index="${index}" title="移除候选任务" aria-label="移除候选任务 ${index + 1}">${icon('trash', 13)}</button>`}</div>
       <div class="document-task-fields">
@@ -294,7 +311,8 @@ function openDocumentEditor(id, keepDraft = false) {
         ${inputField(`draft-due-${index}`, '截止日期', task.due, 'date')}
         ${selectField(`draft-priority-${index}`, '优先级', ['P0', 'P1', 'P2', 'P3', 'P4'].map(p => [p, p]), task.priority)}
         ${inputField(`draft-hours-${index}`, '预计小时 · 0 为待估时', task.estimateHours, 'number', 'min="0" max="200" step="0.1"')}
-      </div><p class="small muted document-evidence">来源：${esc(task.evidence || '人工补充')}</p></fieldset>`).join('') || '<p class="small muted">未发现明确行动项，可修改指令后重新分析或添加任务。</p>'}</div>
+      </div>${textField(`draft-details-${index}`, '详细', task.details || '')}
+      <p class="small muted document-evidence">来源：${esc(task.evidence || '人工补充')}</p></fieldset>`).join('') || '<p class="small muted">未发现明确行动项，可修改指令后重新分析或添加任务。</p>'}</div>
     <details class="document-source"><summary>原文与来源</summary><pre class="document-content">${esc(doc.content)}</pre></details>`,
     `<button class="btn btn-sm" data-action="document-library">${icon('arrowLeft', 12)} 附件记录</button>
     ${doc.assetId ? '<button class="btn btn-sm" data-action="document-original">导出原文件</button>' : ''}
@@ -317,6 +335,7 @@ function readDocumentDraft() {
   draft.tasks.forEach((task, index) => {
     task.selected = document.getElementById(`draft-selected-${index}`).checked;
     task.title = fieldValue(`draft-title-${index}`);
+    task.details = fieldValue(`draft-details-${index}`);
     task.assignee = fieldValue(`draft-owner-${index}`);
     task.due = fieldValue(`draft-due-${index}`);
     task.priority = fieldValue(`draft-priority-${index}`);
@@ -339,8 +358,8 @@ function updateDocumentDraft(operation, index) {
 function validateDocumentDraft(draft) {
   if (draft.summary.length > 6000) throw new Error('摘要不能超过 6000 字');
   for (const task of draft.tasks) {
-    if (!task.selected) continue;
-    if (!task.title || task.title.length > 200 || !Number.isFinite(task.estimateHours) ||
+    if (task.selected === false) continue;
+    if (!task.title || task.title.length > 200 || (task.details || '').length > 12000 || !Number.isFinite(task.estimateHours) ||
         task.estimateHours < 0 || task.estimateHours > 200 ||
         (task.due && (!/^\d{4}-\d{2}-\d{2}$/.test(task.due) || Number.isNaN(Date.parse(task.due))))) {
       throw new Error('请检查任务标题、日期和预计小时（0 至 200）');
@@ -348,10 +367,28 @@ function validateDocumentDraft(draft) {
   }
 }
 
-async function applyDocumentToProject(doc, projectId) {
+async function applyDocumentToProject(doc, projectId, persist = true) {
+  const before = JSON.parse(JSON.stringify(DB));
+  try { await writeDocumentToProject(doc, projectId, persist); }
+  catch (error) { restoreDocumentSnapshot(before); throw error; }
+}
+
+async function writeDocumentToProject(doc, projectId, persist) {
   const project = projectById(projectId);
   if (!project) throw new Error('项目已不存在，请重新选择');
   validateDocumentDraft(doc.analysis);
+  const claimed = new Set();
+  for (const task of doc.analysis.tasks.filter(task => task.selected !== false)) {
+    for (const id of documentTaskIds(task)) {
+      if (claimed.has(id)) throw new Error('同一任务被重复分组，请重新整理后保存');
+      claimed.add(id);
+    }
+    if (task.mergeTaskIds?.length) {
+      const records = validateDocumentMerge(documentTaskIds(task));
+      if (records.some(record => record.sourceDocumentId !== doc.id)) throw new Error('只能合并此附件生成的任务');
+    }
+  }
+  const previousProjects = new Set();
   for (const detail of Object.values(DB.projectDetails)) {
     detail.docs = (detail.docs || []).filter(item => item.id !== doc.id);
   }
@@ -362,13 +399,17 @@ async function applyDocumentToProject(doc, projectId) {
   doc.analysis.projectId = projectId;
   for (const task of doc.analysis.tasks) {
     if (task.selected === false) continue;
+    mergeDocumentWorkRecords(task, doc);
     let found = task.taskId ? taskLocation(task.taskId) : null;
     if (task.taskId && !found) continue;
     const record = found?.task || { id: newRecordId('task'), done: false, createdAt: new Date().toISOString(),
       sourceDocumentId: doc.id, note: `附件：${doc.title}\n${task.evidence || '人工补充'}` };
     const previousDue = record.due;
+    previousProjects.add(record.project);
     Object.assign(record, { title: task.title, assignee: task.assignee, project: projectId,
-      due: task.due || '待确认', priority: task.priority, estimate: task.estimateHours ? `${task.estimateHours}h` : '待估时' });
+      details: task.details || '', due: task.due || '待确认', priority: task.priority,
+      estimate: task.estimateHours ? `${task.estimateHours}h` : '待估时' });
+    if (record.due !== previousDue) delete record.deadlineDate;
     const bucket = ['P0', 'P1'].includes(task.priority) ? 'must' : !task.due || task.priority === 'P4' ? 'could' : 'should';
     if (!found) {
       task.taskId = record.id;
@@ -380,8 +421,9 @@ async function applyDocumentToProject(doc, projectId) {
     }
   }
   doc.updatedAt = new Date().toISOString();
-  updateTaskCapacity();
-  await persistWorkbench();
+  doc.analysisPending = false;
+  reconcileProjectWork([...previousProjects, projectId]);
+  if (persist) await persistWorkbench();
 }
 
 async function saveDocumentEditor(apply = false) {
@@ -396,6 +438,8 @@ async function saveDocumentEditor(apply = false) {
   if (apply && projectId === 'new' && !draft.projectName) throw new Error('请填写新项目名称');
   if (!apply && doc.projectId && projectId !== doc.projectId) throw new Error('项目归属已修改，请点击确认归档并保存任务');
   state.documentSaving = true;
+  const before = JSON.parse(JSON.stringify(DB));
+  const beforeChat = JSON.parse(JSON.stringify(state.chatMessages || []));
   try {
     if (apply && projectId === 'new') {
       const existing = DB.projects.find(project => project.name === draft.projectName);
@@ -413,16 +457,22 @@ async function saveDocumentEditor(apply = false) {
     doc.analysisEngine = draft.analysisEngine;
     DB.documentInstructions = draft.instructions;
     doc.analysis = JSON.parse(JSON.stringify(draft));
-    if (apply || (doc.projectId && projectId === doc.projectId)) await applyDocumentToProject(doc, projectId);
+    if (apply || (doc.projectId && projectId === doc.projectId)) await applyDocumentToProject(doc, projectId, false);
     else {
       // Saving an unconfirmed project choice does not create or move any project.
       doc.analysis.projectId = doc.projectId || null;
       doc.analysis.proposedProjectId = projectId;
-      await persistWorkbench();
     }
-    render();
-    openDocumentEditor(doc.id);
-    showToast(apply ? '文档与任务已保存到项目' : '修改已保存；项目归档等待确认');
+    doc.analysisPending = false;
+    publishDocumentSummary(doc);
+    await persistWorkbench();
+    returnDocumentToChat();
+    showToast(doc.projectId ? '文档与任务已保存到项目' : '修改已保存；项目归档等待确认');
+  } catch (error) {
+    restoreDocumentSnapshot(before);
+    state.chatMessages = beforeChat;
+    saveChatHistory();
+    throw error;
   } finally { state.documentSaving = false; }
 }
 
@@ -441,25 +491,27 @@ async function reanalyzeDocument(confirmed = false) {
   }
   state.documentReanalysisDraft = null;
   state.documentAnalyzing = true;
+  const before = JSON.parse(JSON.stringify(DB));
+  const beforeChat = JSON.parse(JSON.stringify(state.chatMessages || []));
   const button = document.querySelector('[data-action="document-reanalyze"]');
   if (button) { button.disabled = true; button.textContent = '分析中…'; }
   try {
     doc.instructions = draft.instructions;
     doc.analysisEngine = draft.analysisEngine;
     DB.documentInstructions = draft.instructions;
-    const result = await analyzeImportedDocument(doc);
-    result.tasks.forEach(task => { task.id = newRecordId('draft'); task.selected = true; });
-    for (const previous of draft.tasks.filter(task => task.taskId)) {
-      const match = result.tasks.find(task => !task.taskId &&
-        (task.evidence === previous.evidence || task.title === previous.title));
-      if (match) match.taskId = previous.taskId;
-      else result.tasks.push(previous);
-    }
-    if (result.tasks.length > 80) throw new Error('合并后的任务超过 80 条，请先整理现有任务');
+    const result = prepareDocumentAnalysis(await analyzeImportedDocument(doc), draft.tasks);
+    result.model = result.mode === '本地规则' ? '本地规则' : aiProviderConfig().model;
     result.proposedProjectId = draft.projectId;
     doc.analysis = result;
+    doc.analysisPending = true;
+    publishDocumentSummary(doc);
     await persistWorkbench();
-    openDocumentEditor(doc.id);
+    returnDocumentToChat();
+  } catch (error) {
+    restoreDocumentSnapshot(before);
+    state.chatMessages = beforeChat;
+    saveChatHistory();
+    throw error;
   } finally {
     state.documentAnalyzing = false;
     if (button?.isConnected) { button.disabled = false; button.textContent = '重新分析'; }
