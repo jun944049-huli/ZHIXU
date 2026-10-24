@@ -200,6 +200,9 @@ function openProfileSettings(tab = 'general') {
           <p id="profile-photo-status" class="small" role="status" aria-live="polite"></p>
 
           <div class="form-grid">
+            ${window.xiaoyuDesktop?.updates ? `<div class="field full">
+              <button class="btn" data-action="update-settings">${icon('download', 14)} 软件更新</button>
+            </div>` : ''}
             ${window.xiaoyuDesktop?.remoteAccess ? `<div class="field full">
               <button class="btn" data-action="remote-settings">${icon('link', 14)} 网页访问</button>
             </div>` : ''}

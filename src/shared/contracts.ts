@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { UpdateStatus } from './updates';
 
 const entity = z.object({ id: z.string().min(1) }).passthrough();
 export const snapshotSchema = z.object({
@@ -53,6 +54,8 @@ export interface DesktopAPI {
   isRemote?: boolean;
   revision?(): Promise<{ changed: boolean }>;
   reload?(): Promise<void>;
+  updates?(payload: unknown): Promise<UpdateStatus>;
+  onUpdate?(listener: (status: UpdateStatus) => void): () => void;
   remoteAccess?(payload: unknown): Promise<{ running: boolean; busy: boolean; url: string; localURL: string; message: string; hasPassword: boolean }>;
   polish(payload: unknown): Promise<{ text: string; model: string; provider: string }>;
   captureTask(payload: unknown): Promise<{ title: string; model: string }>;

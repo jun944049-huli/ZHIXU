@@ -12,7 +12,7 @@ cpSync(resolve('prototype/brand'), resolve(destination, 'brand'), { recursive: t
 const scripts = [
   'data.js', 'storage.js', 'shared.js', 'chat-format.js', 'views-core.js', 'views-chat.js',
   'views-project.js', 'views-output.js', 'modals.js', 'operations.js', 'work-sync.js', 'integrations.js',
-  'features.js', 'analytics.js', 'documents.js', 'document-workflow.js', 'workspace.js', 'plugins.js', 'remote.js', 'app.js'
+  'features.js', 'analytics.js', 'documents.js', 'document-workflow.js', 'workspace.js', 'plugins.js', 'remote.js', 'updates.js', 'app.js'
 ];
 writeFileSync(resolve(destination, 'workbench-bundle.js'),
   scripts.map(name => readFileSync(resolve('prototype', name), 'utf8')).join('\n;\n'));

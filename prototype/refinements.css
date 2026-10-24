@@ -600,3 +600,15 @@ summary { cursor: pointer; }
   .view-tabs { overflow-x: auto; }
   .view-tabs button { flex-shrink: 0; }
 }
+#desktop-update-notice {
+  position: fixed;
+  right: 24px;
+  bottom: 20px;
+  z-index: 45;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 2px 12px #00000014;
+}
+.update-modal progress { width: 100%; accent-color: #287c69; }
+.update-modal details summary { cursor: pointer; }
+.update-modal .modal-foot { flex-wrap: wrap; gap: 8px; }

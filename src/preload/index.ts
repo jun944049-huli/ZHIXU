@@ -6,6 +6,12 @@ const api: DesktopAPI = {
   save: snapshot => ipcRenderer.invoke('workbench:save', snapshot),
   revision: () => ipcRenderer.invoke('workbench:revision'),
   reload: () => ipcRenderer.invoke('workbench:reload'),
+  updates: payload => ipcRenderer.invoke('workbench:updates', payload),
+  onUpdate: listener => {
+    const handler = (_event: Electron.IpcRendererEvent, status: Parameters<typeof listener>[0]) => listener(status);
+    ipcRenderer.on('workbench:update-status', handler);
+    return () => ipcRenderer.removeListener('workbench:update-status', handler);
+  },
   remoteAccess: payload => ipcRenderer.invoke('workbench:remote-access', payload),
   polish: payload => ipcRenderer.invoke('workbench:polish', payload),
   captureTask: payload => ipcRenderer.invoke('workbench:capture-task', payload),

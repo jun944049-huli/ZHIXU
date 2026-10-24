@@ -17,6 +17,9 @@ $curlConfiguration = 'header = "Authorization: Bearer ' + $credentials['password
 $apiRoot = 'https://api.github.com/repos/jun944049-huli/HULIKU/releases'
 $statePath = Join-Path 'release' "release-state-$Version.json"
 $assetNames = @("Zhixu-$Version-Windows-Setup.exe", "Zhixu-$Version-source.zip", "SHA256SUMS-$Version.txt")
+if ([version]$Version -ge [version]'0.2.9') {
+  $assetNames += @("Zhixu-$Version-Windows-Setup.exe.blockmap", 'latest.yml')
+}
 function Invoke-ReleaseAPI([string]$Method, [string]$Url, [string]$Body = '') {
   $arguments = @('--config','-','--http1.1','--noproxy','*','--connect-timeout','15','--max-time','60',
     '--silent','--show-error','--fail-with-body','-X',$Method,'-H','Accept: application/vnd.github+json','-o',$statePath)

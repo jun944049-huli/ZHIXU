@@ -17,10 +17,14 @@ import { Workspace } from './workspace';
 import { Plugins } from './plugins';
 import { SharedWorkbench } from './remote-state';
 import { RemoteAccess } from './remote-access';
+import updater from 'electron-updater';
+import { dirname } from 'node:path';
+import { Updates, UpdatePreparationError, githubCredential, UPDATE_REPOSITORY } from './updates';
 
 let store: WorkbenchStore;
 let window: BrowserWindow | null = null;
 let remoteAccess: RemoteAccess | undefined;
+let updates: Updates | undefined;
 
 async function pdfBytes(title: string, text: string) {
   const printWindow = new BrowserWindow({ show: false, webPreferences: {
@@ -239,10 +243,49 @@ else {
       checkSender(event);
       return workspace.handle(payload);
     });
+    let closing = false;
+    updates = new Updates(join(dataDir, 'updates.json'), {
+      version: app.getVersion(), packaged: app.isPackaged,
+      encrypt(value) {
+        if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，更新凭据未保存');
+        return safeStorage.encryptString(value).toString('base64');
+      },
+      decrypt: value => safeStorage.decryptString(Buffer.from(value, 'base64')),
+      credential: githubCredential,
+      engine(token) {
+        const engine = new updater.NsisUpdater({ ...UPDATE_REPOSITORY, token });
+        engine.logger = null;
+        engine.autoDownload = false;
+        engine.autoInstallOnAppQuit = false;
+        engine.allowDowngrade = false;
+        engine.allowPrerelease = false;
+        engine.disableDifferentialDownload = true;
+        engine.disableWebInstaller = true;
+        engine.installDirectory = dirname(app.getPath('exe'));
+        return engine;
+      },
+      async prepare() {
+        if (!window || window.isDestroyed()) throw new Error('窗口已关闭');
+        const ready = await window.webContents.executeJavaScript(
+          'typeof prepareWorkbenchUpdate === "function" ? prepareWorkbenchUpdate() : false');
+        if (!ready) throw new UpdatePreparationError('请先完成当前对话、文件处理、计时或未保存的编辑，再重启更新。');
+        const backups = join(dataDir, 'backups');
+        mkdirSync(backups, { recursive: true });
+        await store.backup(join(backups, `before-update-${app.getVersion()}-${Date.now()}.sqlite`));
+        await remoteAccess?.stop();
+        await plugins.dispose(); workspace.dispose();
+        closing = true;
+      },
+      notify(status) {
+        if (status.stage === 'error' || status.stage === 'ready') closing = false;
+        if (window && !window.isDestroyed()) window.webContents.send('workbench:update-status', status);
+      }
+    });
+    ipcMain.handle('workbench:updates', (event, payload: unknown) => { checkSender(event); return updates!.handle(payload); });
+    updates.start();
     const devUrl = process.env.ELECTRON_RENDERER_URL;
     if (devUrl) void window.loadURL(devUrl);
     else void window.loadFile(join(import.meta.dirname, '../renderer/index.html'));
-    let closing = false;
     window.on('close', event => {
       if (closing || !window) return;
       event.preventDefault();
@@ -263,4 +306,4 @@ else {
 }
 
 app.on('window-all-closed', () => app.quit());
-app.on('will-quit', () => { void remoteAccess?.stop(); store?.close(); });
+app.on('will-quit', () => { updates?.dispose(); void remoteAccess?.stop(); store?.close(); });

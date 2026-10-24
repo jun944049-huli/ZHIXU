@@ -1,6 +1,6 @@
 {
   "name": "xiaoyu-workbench",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "private": true,
   "description": "知序 · 个人工作台",
   "main": "./out/main/index.js",
@@ -33,6 +33,7 @@
     "test:overdue-layout": "node tests/overdue-layout.smoke.mjs",
     "test:startup": "node tests/startup.smoke.mjs",
     "test:remote": "node tests/remote.smoke.mjs",
+    "test:updates": "node tests/updates.smoke.mjs",
     "pack": "npm run build && electron-builder --win dir",
     "dist": "npm run build && electron-builder --win nsis",
     "postinstall": "electron-builder install-app-deps"
@@ -40,6 +41,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
     "docx": "^9.13.0",
+    "electron-updater": "6.8.11",
     "exceljs": "^4.4.0",
     "imapflow": "^2.5.9",
     "node-ical": "^0.27.3",
@@ -51,8 +53,6 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
-    "ip-address": "10.7.4",
-    "npm": "12.2.1",
     "@playwright/test": "^1.64.1",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
@@ -61,6 +61,8 @@
     "electron": "^45.0.0",
     "electron-builder": "^26.0.0",
     "electron-vite": "^6.0.0",
+    "ip-address": "10.7.4",
+    "npm": "12.2.1",
     "pptxgenjs": "^4.0.1",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
@@ -82,6 +84,12 @@
       "package.json"
     ],
     "afterPack": "scripts/copy-plugin-runtime.cjs",
+    "publish": {
+      "provider": "github",
+      "owner": "jun944049-huli",
+      "repo": "HULIKU",
+      "private": true
+    },
     "win": {
       "executableName": "Xiaoyu",
       "target": [

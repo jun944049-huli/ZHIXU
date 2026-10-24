@@ -76,6 +76,7 @@ function handleClick(e) {
   const el = e.target.closest('[data-action]');
   if (!el) return;
   const action = el.dataset.action;
+  if (action.startsWith('update-')) { void desktopUpdateAction(action); return; }
   if (action.startsWith('remote-')) { void remoteAction(action); return; }
   if (action === 'web-logout') {
     void persistWorkbench().then(() => window.xiaoyuDesktop.logout())
@@ -617,6 +618,7 @@ async function boot() {
   document.documentElement.dataset.theme = state.theme;
   render();
   if (typeof initializeWorkbenchSync === 'function') initializeWorkbenchSync();
+  initializeDesktopUpdates();
   document.addEventListener('click', handleClick);
   document.addEventListener('input', handleInput);
   document.addEventListener('change', handleChange);

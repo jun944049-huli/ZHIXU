@@ -71,6 +71,10 @@ try {
     assert.equal(await page.evaluate(() => window.xiaoyuDesktop.isRemote), true);
     assert.equal(await page.evaluate(key => JSON.stringify(workbenchSnapshot()).includes(key), key), false);
     assert.equal(await page.locator('[data-action="remote-settings"]').count(), 0);
+    assert.equal(await page.evaluate(() => typeof window.xiaoyuDesktop.updates), 'undefined');
+    await page.evaluate(() => openProfileSettings());
+    assert.equal(await page.locator('[data-action="update-settings"]').count(), 0);
+    await page.evaluate(() => closeModal());
   }
   console.log('Desktop and mobile browsers logged in over HTTPS');
   await phone.evaluate(async () => { DB.projects[0].goal = '手机保存的共享目标'; render(); await persistWorkbench(); });
