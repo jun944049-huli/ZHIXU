@@ -332,7 +332,7 @@ function renderProject() {
           <h3>${icon('layout', 15)} 任务 <span class="count-badge">${projectTasks.length}</span></h3>
           <div class="row gap-6">
             <button class="btn btn-sm" data-action="project-board">${icon('layout', 12)} ${state.projectBoard ? '列表' : '看板'}</button>
-            <button class="btn btn-sm btn-primary" data-action="project-task" data-id="${p.id}">${icon('plus', 12)} 新建</button>
+            <button class="btn btn-sm btn-primary" data-action="project-task" data-id="${p.id}">${icon('plus', 12)} 添加事项</button>
           </div>
         </div>
         ${state.projectBoard ? `<div class="task-board">${['待开始', '进行中', '阻塞', '已完成'].map(status => `<section><h3>${status}</h3>
@@ -421,7 +421,7 @@ function renderProject() {
       <div class="detail-actions">
         <button class="btn btn-danger" data-action="delete-project" data-id="${p.id}">${icon('trash', 13)} 删除</button>
         <button class="btn" data-action="edit-project" data-id="${p.id}">${icon('edit', 13)} 编辑</button>
-        <button class="btn btn-primary" data-action="project-task" data-id="${p.id}">${icon('plus', 13)} 新建任务</button>
+        <button class="btn btn-primary" data-action="project-task" data-id="${p.id}">${icon('plus', 13)} 添加事项</button>
       </div>
     </div>
 

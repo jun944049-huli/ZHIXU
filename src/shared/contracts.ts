@@ -51,6 +51,7 @@ export interface DesktopAPI {
   load(): Promise<WorkbenchSnapshot | null>;
   save(snapshot: WorkbenchSnapshot): Promise<void>;
   polish(payload: unknown): Promise<{ text: string; model: string; provider: string }>;
+  captureTask(payload: unknown): Promise<{ title: string; model: string }>;
   chat(payload: unknown): Promise<ChatResult>;
   providerModels(payload: unknown): Promise<{ models: string[]; endpoint: string }>;
   providerDiagnose(payload: unknown): Promise<ProviderDiagnosis>;

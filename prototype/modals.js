@@ -719,12 +719,14 @@ function applyWorkflowTemplate(key) {
 function openCapture(projectId = null) {
   state.captureProjectId = projectById(projectId)?.id || null;
   state.captureDraft = null;
+  state.captureParsed = false;
+  const provider = aiProviderConfig();
   const sample = '老板说：星火下周要给客户演示，你把这周的联调问题整理一下，周三前发我，顺便把演示环境也准备下。';
   const sources = ['飞书', '邮件', '会议', '自己'];
   const root = document.getElementById('modal-root');
   root.innerHTML = `
     <div class="modal-backdrop" data-action="backdrop">
-      <div class="modal" role="dialog" aria-modal="true" aria-label="快速捕获">
+      <div class="modal capture-modal" role="dialog" aria-modal="true" aria-label="添加事项">
         <div class="modal-head">
           <div class="ai-orb">${icon('sparkles', 16)}</div>
           <div>
@@ -739,19 +741,22 @@ function openCapture(projectId = null) {
           </div>
 
           <div class="capture-area">
-            <textarea id="capture-text" placeholder="${esc(sample)}"></textarea>
+            <textarea id="capture-text" maxlength="12000" placeholder="${esc(sample)}"></textarea>
           </div>
 
           <div id="capture-result"></div>
         </div>
 
-        <div class="modal-foot">
+        <div class="modal-foot capture-actions">
           <div class="left">
-            <span class="chip">本地规则</span>
-            <span class="tiny muted">待确认</span>
+            <span class="chip" id="capture-engine">${esc(provider.id === 'local' ? '本地规则' : provider.model)}</span>
           </div>
+          <p class="capture-feedback tiny muted" id="capture-feedback" role="status"></p>
+          <div class="capture-buttons">
           <button class="btn" data-action="close-modal">取消</button>
           <button class="btn btn-primary" id="parse-btn" data-action="parse">${icon('sparkles', 13)} 解析</button>
+          <button class="btn btn-primary" id="capture-save" data-action="confirm-capture" hidden>${icon('check', 13)} 确认保存</button>
+          </div>
         </div>
       </div>
     </div>
@@ -766,45 +771,68 @@ function openCapture(projectId = null) {
 }
 
 function deriveCaptureTitle(text) {
-  const clean = text.replace(/^(老板说|王总说|张经理说|客户说|领导说)[：:，,\s]*/, '').trim();
-  if (/联调问题/.test(clean)) return '整理联调问题并发给王总';
-  if (/竞品分析/.test(clean)) return '输出竞品分析结论';
-  if (/灰度/.test(clean)) return '评估灰度名单扩大影响';
-  if (/演示环境/.test(clean)) return '准备客户演示环境';
-  const first = clean.split(/[。！？!?；;]/)[0];
-  const clause = first.split(/[，,]/)[0];
-  return clause.length > 26 ? clause.slice(0, 26) + '…' : clause;
+  return text.trim()
+    .replace(/^(?:老板|客户|领导|[\u4e00-\u9fff]{1,4}(?:总|经理))说[：:，,\s]*/, '')
+    .replace(/^[^：:\n]{1,30}项目[：:]\s*/, '')
+    .replace(/^(?:那个[，,\s]*|就是[，,\s]*)/, '')
+    .replace(/^我(?:明天|后天|今天)?(?:想要|需要|打算|准备|要|想)?(?:去)?给/, '为')
+    .replace(/^我(?:明天|后天|今天)?(?:想要|需要|打算|准备|要|想)(?:去)?/, '')
+    .replace(/^(?:请你|帮我|麻烦你|你)(?:帮我)?(?:把|将)?/, '')
+    .replace(/^把/, '')
+    .replace(/(?:弄一下|弄下|搞一下|搞下)/g, '整理')
+    .replace(/(?:整理|处理|检查|准备|核对)(?:一下|下)(?=[，,。；;\s]|$)/g, match => match.replace(/一下$|下$/, ''))
+    .replace(/[，,]\s*(?:预计|大约|大概)?\s*\d+(?:\.\d+)?\s*(?:小时|h\b)/gi, '')
+    .replace(/[，,]\s*(?:今天|明天|后天)完成[。！!]?$/, '')
+    .replace(/[。！？!?；;]+$/g, '').trim();
 }
 
-function parseCapture() {
+async function parseCapture() {
   const ta = document.getElementById('capture-text');
   const result = document.getElementById('capture-result');
   const btn = document.getElementById('parse-btn');
-  if (!ta || !result || !btn) return;
+  const save = document.getElementById('capture-save');
+  const feedback = document.getElementById('capture-feedback');
+  if (!ta || !result || !btn || btn.disabled) return;
 
   const text = ta.value.trim();
   if (!text) { showToast('先输入需要记录的工作内容'); return; }
   btn.disabled = true;
+  save.disabled = true;
+  feedback.textContent = '';
   btn.innerHTML = `<span class="spinner"></span> 正在解析…`;
 
-  setTimeout(() => {
-    if (!result.isConnected) return;
+  try {
     const pid = state.captureProjectId || matchProjectByText(text, false)?.id || null;
-    const title = deriveCaptureTitle(text);
+    const provider = aiProviderConfig();
+    let title = deriveCaptureTitle(text);
+    let model = '本地规则';
+    if (provider.id !== 'local') {
+      if (!window.xiaoyuDesktop?.captureTask) throw new Error('当前预览不支持模型解析，请使用更新后的桌面版');
+      const parsed = await window.xiaoyuDesktop.captureTask({
+        text, projectName: projectById(pid)?.name || '',
+        provider: { baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: provider.model, protocol: provider.protocol || 'auto' }
+      });
+      title = parsed.title;
+      model = parsed.model;
+    }
+    if (!result.isConnected) return;
+    if (ta.value.trim() !== text) throw new Error('内容已修改，请重新解析');
+    if (!title || title.length > 80) throw new Error('请缩短事项描述，或连接模型提炼任务标题');
     const explicitDate = text.match(/\b(\d{4}-\d{2}-\d{2})\b/);
     const date = explicitDate ? explicitDate[1]
       : /明天/.test(text) ? addDaysISO(DB.meta.today, 1)
       : /后天/.test(text) ? addDaysISO(DB.meta.today, 2) : DB.meta.today;
     const hours = text.match(/(\d+(?:\.\d+)?)\s*(?:小时|h\b)/i);
     const estimate = hours ? Number(hours[1]) : 1;
-    state.captureDraft = { raw: text, source: state.captureSource, title, project: pid, date, estimate };
+    state.captureDraft = { raw: text, source: state.captureSource, title, project: pid, date, estimate, model };
+    document.getElementById('capture-engine').textContent = model;
 
     result.innerHTML = `
       <div class="parse-result">
         <div class="parse-result-head">${icon('file', 12)} 待确认任务</div>
         <div class="form-grid" style="padding:16px">
           <div class="field full"><label for="capture-title">任务标题</label>
-            <input class="input" id="capture-title" value="${esc(title)}"></div>
+            <input class="input" id="capture-title" maxlength="80" value="${esc(title)}"></div>
           <div class="field"><label for="capture-project">项目</label>
             <select class="select" id="capture-project">
               <option value="">未归属</option>
@@ -819,18 +847,20 @@ function parseCapture() {
               <option>P0</option><option selected>P1</option><option>P2</option><option>P3</option>
             </select></div>
         </div>
-        <div class="parse-result-foot">
-          ${icon('shield', 11)}
-          <span>确认后保存任务与原文</span>
-          <button class="btn btn-primary btn-sm" data-action="confirm-capture">${icon('check', 12)} 确认保存</button>
-        </div>
       </div>
     `;
-
-    btn.disabled = false;
-    btn.innerHTML = `${icon('sparkles', 13)} 重新解析`;
+    save.hidden = false;
+    btn.classList.remove('btn-primary');
     state.captureParsed = true;
-  }, 720);
+  } catch (error) {
+    if (result.isConnected) feedback.textContent = '解析失败：' + (error.message || '请重试');
+  } finally {
+    if (btn.isConnected) {
+      btn.disabled = false;
+      save.disabled = false;
+      btn.innerHTML = `${icon('sparkles', 13)} ${state.captureParsed ? '重新解析' : '解析'}`;
+    }
+  }
 }
 
 function openCommand() {

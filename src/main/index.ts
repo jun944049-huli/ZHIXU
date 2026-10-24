@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { WorkbenchStore } from './database';
 import { polish } from './polish';
 import { chat } from './chat';
+import { captureTask } from './capture';
 import { providerDiagnose, providerModels } from './providers';
 import { runIntegration } from './integrations';
 import { exportBuffer, exportSchema, reportHTML } from './exports';
@@ -93,6 +94,10 @@ else {
     ipcMain.handle('workbench:chat', (event, payload: unknown) => {
       checkSender(event);
       return chat(payload);
+    });
+    ipcMain.handle('workbench:capture-task', (event, payload: unknown) => {
+      checkSender(event);
+      return captureTask(payload);
     });
     ipcMain.handle('workbench:provider-models', (event, payload: unknown) => {
       checkSender(event);

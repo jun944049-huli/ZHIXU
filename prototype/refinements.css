@@ -296,6 +296,17 @@ summary { cursor: pointer; }
 .modal-head h2 { font-size: 17px; }
 .modal-body { padding: 23px 24px; }
 .modal-foot { padding: 16px 24px; background: var(--surface); }
+.capture-actions { flex-wrap: wrap; }
+.capture-actions .capture-feedback { flex: 0 0 100%; margin: 0; color: var(--red); }
+.capture-feedback:empty { display: none; }
+.capture-buttons { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.capture-buttons .btn { flex: 0 0 auto; white-space: nowrap; }
+.capture-buttons [hidden] { display: none; }
+@media (max-width: 560px) {
+  .capture-actions .left { width: 100%; }
+  .capture-buttons { width: 100%; justify-content: flex-end; gap: 6px; }
+  .capture-buttons .btn { padding-inline: 10px; }
+}
 .overdue-list .feature-list-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) repeat(2, 112px);

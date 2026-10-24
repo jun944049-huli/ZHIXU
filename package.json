@@ -1,6 +1,6 @@
 {
   "name": "xiaoyu-workbench",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "知序 · 个人工作台",
   "main": "./out/main/index.js",
@@ -22,6 +22,7 @@
     "test:interfaces": "node tests/interfaces.smoke.mjs",
     "test:documents": "node tests/documents.smoke.mjs",
     "test:analysis": "node tests/document-analysis.smoke.mjs",
+    "test:capture": "node tests/capture.smoke.mjs",
     "test:providers": "node tests/providers.smoke.mjs",
     "test:chat": "node tests/chat.smoke.mjs",
     "test:stakeholders": "node tests/stakeholders.smoke.mjs",
