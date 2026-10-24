@@ -1,6 +1,6 @@
 {
   "name": "xiaoyu-workbench",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "private": true,
   "description": "知序 · 个人工作台",
   "main": "./out/main/index.js",
@@ -32,6 +32,7 @@
     "test:overdue": "node tests/overdue.smoke.mjs",
     "test:overdue-layout": "node tests/overdue-layout.smoke.mjs",
     "test:startup": "node tests/startup.smoke.mjs",
+    "test:remote": "node tests/remote.smoke.mjs",
     "pack": "npm run build && electron-builder --win dir",
     "dist": "npm run build && electron-builder --win nsis",
     "postinstall": "electron-builder install-app-deps"

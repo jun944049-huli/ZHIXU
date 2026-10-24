@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录知序</title>
+  <link rel="icon" type="image/svg+xml" href="/brand/zhixu-c.svg">
+  <link rel="stylesheet" href="/remote-login.css">
+  <script src="/remote-login.js" defer></script>
+</head>
+<body>
+  <main>
+    <img src="/brand/zhixu-c.svg" width="48" height="48" alt="">
+    <h1>知序</h1>
+    <form id="login-form">
+      <label for="login-password">访问密码</label>
+      <input type="password" id="login-password" autocomplete="current-password" required maxlength="200" autofocus>
+      <button id="login-submit" type="submit">登录</button>
+      <p id="login-status" role="status" aria-live="polite"></p>
+    </form>
+  </main>
+</body>
+</html>

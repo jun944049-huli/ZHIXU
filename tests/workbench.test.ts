@@ -32,6 +32,15 @@ function workbench() {
   };
 }
 
+test('new tasks are normalized before sharing and do not change when another device opens them', () => {
+  const w = workbench();
+  w.run(`addConfirmedTask({id:'shared-new',title:'浏览器验收',project:'p1',done:false,
+    due:'待确认',priority:'P2',estimate:'待估时'},DB.meta.today,'could');`);
+  const before = JSON.parse(w.run("JSON.stringify(taskLocation('shared-new').task)"));
+  w.run('initializeFeatures();');
+  assert.deepEqual(JSON.parse(w.run("JSON.stringify(taskLocation('shared-new').task)")), before);
+});
+
 test('overdue migration preserves independent projects, completed tasks and task identity across reloads', () => {
   const w = workbench();
   w.run(`DB.tasks={must:[],should:[],could:[]}; DB.taskCalendar={};

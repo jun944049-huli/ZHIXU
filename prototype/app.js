@@ -76,7 +76,14 @@ function handleClick(e) {
   const el = e.target.closest('[data-action]');
   if (!el) return;
   const action = el.dataset.action;
+  if (action.startsWith('remote-')) { void remoteAction(action); return; }
+  if (action === 'web-logout') {
+    void persistWorkbench().then(() => window.xiaoyuDesktop.logout())
+      .then(() => location.replace('/login')).catch(error => showToast(error.message));
+    return;
+  }
   if (action.startsWith('plugin-')) {
+    if (window.xiaoyuDesktop?.isRemote) { showToast('安装和运行本机插件请使用桌面版'); return; }
     if (action === 'plugin-open') { state.dataTab = 'plugins'; render(); }
     else if (action === 'plugin-manage') openPluginManager(el.dataset.id);
     else void handlePluginAction(action);
@@ -609,6 +616,7 @@ async function boot() {
   } catch (e) { /* ignore */ }
   document.documentElement.dataset.theme = state.theme;
   render();
+  if (typeof initializeWorkbenchSync === 'function') initializeWorkbenchSync();
   document.addEventListener('click', handleClick);
   document.addEventListener('input', handleInput);
   document.addEventListener('change', handleChange);

@@ -41,14 +41,7 @@ function migrateOverdueTasks() {
   DB.overdue = [];
   for (const task of allWorkbenchTasks()) {
     task.scheduledDate ||= taskLocation(task.id)?.date || DB.meta.today;
-    const deadline = taskDeadlineDate(task);
-    if (deadline) {
-      task.deadlineDate = deadline;
-      // Freeze relative dates so "yesterday" cannot shift every time the app opens.
-      task.due = String(task.due || '').replace(/^(昨天|今天|今日|明天)/, deadline);
-    } else if (task.overdue) task.deadlineDate = task.scheduledDate < DB.meta.today
-      ? task.scheduledDate : addDaysISO(DB.meta.today, -1);
-    task.overdue = isTaskOverdue(task);
+    normalizeTaskDates(task);
   }
 }
 

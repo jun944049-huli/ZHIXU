@@ -38,6 +38,13 @@ function renderWorkspace() {
 
 function renderWorkspaceContent() {
   const ws = workspaceState;
+  if (window.xiaoyuDesktop?.isRemote) {
+    return `<div class="workspace-files-scroll"><div class="workspace-section-label">项目附件</div>
+      <button class="btn btn-sm" data-action="workspace-upload">${icon('upload', 14)} 上传文件</button>
+      ${(DB.documents || []).map(doc => `<button class="workspace-file-row" data-action="document-open" data-id="${esc(doc.id)}">${icon('file', 17)}<span>${esc(doc.title)}</span></button>`).join('') ||
+        '<p class="workspace-muted">暂无附件</p>'}
+      <p class="workspace-muted">本机文件夹、终端和原生浏览器请在主机桌面版使用。</p></div>`;
+  }
   const root = ws.roots.find(item => item.id === ws.rootId);
   const error = ws.error ? `<p class="workspace-error" role="alert">${esc(ws.error)}</p>` : '';
   if (ws.tab === 'home') return `<div class="workspace-start">

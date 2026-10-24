@@ -4,6 +4,9 @@ import type { DesktopAPI } from '../shared/contracts';
 const api: DesktopAPI = {
   load: () => ipcRenderer.invoke('workbench:load'),
   save: snapshot => ipcRenderer.invoke('workbench:save', snapshot),
+  revision: () => ipcRenderer.invoke('workbench:revision'),
+  reload: () => ipcRenderer.invoke('workbench:reload'),
+  remoteAccess: payload => ipcRenderer.invoke('workbench:remote-access', payload),
   polish: payload => ipcRenderer.invoke('workbench:polish', payload),
   captureTask: payload => ipcRenderer.invoke('workbench:capture-task', payload),
   chat: payload => ipcRenderer.invoke('workbench:chat', payload),

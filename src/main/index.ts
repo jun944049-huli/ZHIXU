@@ -1,6 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, net, safeStorage } from 'electron';
 import { join, resolve } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { readFile, rm } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { WorkbenchStore } from './database';
 import { polish } from './polish';
 import { chat, summarizeChat } from './chat';
@@ -13,9 +15,22 @@ import { analyzeDocument } from './document-analysis';
 import { z } from 'zod';
 import { Workspace } from './workspace';
 import { Plugins } from './plugins';
+import { SharedWorkbench } from './remote-state';
+import { RemoteAccess } from './remote-access';
 
 let store: WorkbenchStore;
 let window: BrowserWindow | null = null;
+let remoteAccess: RemoteAccess | undefined;
+
+async function pdfBytes(title: string, text: string) {
+  const printWindow = new BrowserWindow({ show: false, webPreferences: {
+    sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false
+  } });
+  try {
+    await printWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(reportHTML(title, text)));
+    return await printWindow.webContents.printToPDF({ pageSize: 'A4', printBackground: true });
+  } finally { printWindow.destroy(); }
+}
 
 const dataOverride = process.env.XIAOYU_DATA_DIR;
 const userDataPath = dataOverride || join(app.getPath('appData'), 'Xiaoyu');
@@ -41,17 +56,24 @@ else {
         return safeStorage.decryptString(Buffer.from(value, 'base64'));
       }
     });
+    const shared = new SharedWorkbench(store);
+    let desktopRevision = shared.revision;
     const checkSender = (event: Electron.IpcMainInvokeEvent) => {
       if (!window || event.sender !== window.webContents ||
           event.senderFrame !== window.webContents.mainFrame) {
         throw new Error('不允许此窗口访问工作数据');
       }
     };
-    ipcMain.handle('workbench:load', event => { checkSender(event); return store.load(); });
+    ipcMain.handle('workbench:load', event => {
+      checkSender(event); desktopRevision = shared.revision; return shared.load();
+    });
     ipcMain.handle('workbench:save', (event, payload: unknown) => {
       checkSender(event);
-      store.save(payload);
+      desktopRevision = shared.save(payload, desktopRevision);
     });
+    ipcMain.handle('workbench:revision', event => { checkSender(event); return { changed: desktopRevision !== shared.revision }; });
+    ipcMain.handle('workbench:reload', event => { checkSender(event); window!.webContents.reload(); });
+    ipcMain.handle('workbench:remote-access', (event, payload: unknown) => { checkSender(event); return remoteAccess!.handle(payload); });
     ipcMain.handle('workbench:export', async (event, input: unknown) => {
       checkSender(event);
       const payload = exportSchema.parse(input);
@@ -62,13 +84,7 @@ else {
       });
       if (result.canceled || !result.filePath) return { saved: false };
       if (payload.format === 'pdf') {
-        const printWindow = new BrowserWindow({ show: false, webPreferences: {
-          sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false
-        } });
-        try {
-          await printWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(reportHTML(payload.title, payload.text)));
-          writeFileSync(result.filePath, await printWindow.webContents.printToPDF({ pageSize: 'A4', printBackground: true }));
-        } finally { printWindow.destroy(); }
+        writeFileSync(result.filePath, await pdfBytes(payload.title, payload.text));
       } else writeFileSync(result.filePath, await exportBuffer(payload));
       return { saved: true };
     });
@@ -150,6 +166,48 @@ else {
       try { return await runIntegration(payload, { fetch: net.fetch.bind(net) }); }
       finally { activeIntegrations.delete(id); }
     });
+    const calls: Record<string, (value: unknown) => Promise<unknown>> = {
+      polish, chat, 'chat-summary': summarizeChat, 'capture-task': captureTask,
+      'provider-models': providerModels, 'provider-diagnose': providerDiagnose,
+      'document-analyze': analyzeDocument,
+      'document-reparse': async value => {
+        if (documentImportBusy) throw new Error('正在处理另一份附件，请稍候');
+        documentImportBusy = true;
+        try { return await documents.reparse(value); } finally { documentImportBusy = false; }
+      },
+      integration: async value => {
+        const id = String((value as { id?: unknown })?.id || '');
+        if (activeIntegrations.has(id)) throw new Error('此连接器正在处理请求，请稍候');
+        activeIntegrations.add(id);
+        try { return await runIntegration(value, { fetch: net.fetch.bind(net) }); }
+        finally { activeIntegrations.delete(id); }
+      }
+    };
+    remoteAccess = new RemoteAccess(join(dataDir, 'remote'), {
+      assets: join(import.meta.dirname, '../renderer'), shared,
+      invoke: (operation, payload) => calls[operation](payload),
+      importDocument: async (name, bytes) => {
+        if (documentImportBusy) throw new Error('正在处理另一份附件，请稍候');
+        documentImportBusy = true;
+        try { return await documents.import({ name, bytes }); } finally { documentImportBusy = false; }
+      },
+      download: async (operation, input) => {
+        if (operation === 'export') {
+          const payload = exportSchema.parse(input);
+          return { name: payload.title.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') + '.' + payload.format,
+            bytes: payload.format === 'pdf' ? await pdfBytes(payload.title, payload.text) : await exportBuffer(payload) };
+        }
+        if (operation === 'original') {
+          const payload = z.object({ assetId: z.string().max(100), name: z.string().max(240) }).parse(input);
+          return { bytes: await documents.original(payload.assetId), name: payload.name };
+        }
+        const temporary = join(dataDir, `remote-backup-${randomBytes(12).toString('hex')}.sqlite`);
+        try {
+          await store.backup(temporary);
+          return { bytes: await readFile(temporary), name: `知序备份-${new Date().toISOString().slice(0, 10)}.sqlite` };
+        } finally { await rm(temporary, { force: true }); }
+      }
+    }, net.fetch.bind(net));
     window = new BrowserWindow({
       width: 1440, height: 960, minWidth: 900, minHeight: 640,
       backgroundColor: '#ffffff',
@@ -197,7 +255,7 @@ else {
         dialog.showErrorBox('工作数据尚未保存', String(error));
       });
     });
-    window.on('closed', () => { void plugins.dispose(); workspace.dispose(); window = null; });
+    window.on('closed', () => { void remoteAccess?.stop(); void plugins.dispose(); workspace.dispose(); window = null; });
   }).catch(error => {
     dialog.showErrorBox('知序启动失败', String(error));
     app.quit();
@@ -205,4 +263,4 @@ else {
 }
 
 app.on('window-all-closed', () => app.quit());
-app.on('will-quit', () => store?.close());
+app.on('will-quit', () => { void remoteAccess?.stop(); store?.close(); });

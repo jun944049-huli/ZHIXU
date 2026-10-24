@@ -105,6 +105,7 @@ function renderTopbar() {
         <button class="icon-btn theme-toggle" data-action="theme" aria-label="切换主题" title="切换主题">
           ${icon(isDark ? 'sun' : 'moon', 17)}
         </button>
+        ${window.xiaoyuDesktop?.isRemote ? '<button class="btn btn-sm" data-action="web-logout">退出</button>' : ''}
       </div>
     </header>
   `;

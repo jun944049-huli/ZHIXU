@@ -200,6 +200,9 @@ function openProfileSettings(tab = 'general') {
           <p id="profile-photo-status" class="small" role="status" aria-live="polite"></p>
 
           <div class="form-grid">
+            ${window.xiaoyuDesktop?.remoteAccess ? `<div class="field full">
+              <button class="btn" data-action="remote-settings">${icon('link', 14)} 网页访问</button>
+            </div>` : ''}
             <div class="field">
               <label>姓名</label>
               <input class="input" id="profile-name" value="${esc(u.name)}" maxlength="20">

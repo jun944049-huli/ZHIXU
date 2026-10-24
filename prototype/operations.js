@@ -109,8 +109,19 @@ function toggleTask(id) {
   void persistWorkbench().catch(() => {});
 }
 
+function normalizeTaskDates(task) {
+  const deadline = taskDeadlineDate(task);
+  if (deadline) {
+    task.deadlineDate = deadline;
+    task.due = String(task.due || '').replace(/^(昨天|今天|今日|明天)/, deadline);
+  } else if (task.overdue) task.deadlineDate = task.scheduledDate < DB.meta.today
+    ? task.scheduledDate : addDaysISO(DB.meta.today, -1);
+  task.overdue = isTaskOverdue(task);
+}
+
 function addConfirmedTask(task, date, bucket, reconcile = true) {
   task.scheduledDate = date;
+  normalizeTaskDates(task);
   if (date === DB.meta.today) DB.tasks[bucket].push(task);
   else {
     DB.taskCalendar = DB.taskCalendar || {};

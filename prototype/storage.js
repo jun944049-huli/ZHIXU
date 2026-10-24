@@ -50,6 +50,9 @@ function persistWorkbench() {
     if (workbenchLastQueued === serialized) workbenchLastQueued = '';
     updateStorageStatus(false);
     showToast('保存失败：' + (error.message || '请检查本机存储空间'));
+    if (/其他设备已更新/.test(error.message || '') && typeof workbenchSyncNotice === 'function') {
+      workbenchSyncNotice(error.message);
+    }
     throw error;
   });
   return workbenchSaveQueue;
@@ -96,6 +99,9 @@ async function initializeWorkbenchStorage() {
   if (snapshot && snapshot.db) {
     Object.assign(DB, snapshot.db);
     Object.assign(workbenchPreferences, snapshot.preferences || {});
+    // Loading an existing record is already saved; opening a page must not queue a write.
+    workbenchLastSaved = JSON.stringify(workbenchSnapshot());
+    workbenchLastQueued = workbenchLastSaved;
   }
   advanceWorkbenchDate();
   workbenchReady = true;
@@ -103,6 +109,9 @@ async function initializeWorkbenchStorage() {
     if (!window.xiaoyuDesktop) {
       void persistWorkbench().catch(() => {});
       return;
+    }
+    if (window.xiaoyuDesktop.isRemote && JSON.stringify(workbenchSnapshot()) !== workbenchLastSaved) {
+      event.preventDefault(); event.returnValue = '';
     }
     // The desktop main process waits for persistWorkbench before closing.
   });

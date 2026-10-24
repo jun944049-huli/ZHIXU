@@ -50,6 +50,10 @@ export const polishSchema = z.object({
 export interface DesktopAPI {
   load(): Promise<WorkbenchSnapshot | null>;
   save(snapshot: WorkbenchSnapshot): Promise<void>;
+  isRemote?: boolean;
+  revision?(): Promise<{ changed: boolean }>;
+  reload?(): Promise<void>;
+  remoteAccess?(payload: unknown): Promise<{ running: boolean; busy: boolean; url: string; localURL: string; message: string; hasPassword: boolean }>;
   polish(payload: unknown): Promise<{ text: string; model: string; provider: string }>;
   captureTask(payload: unknown): Promise<{ title: string; model: string }>;
   chat(payload: unknown): Promise<ChatResult>;
