@@ -1,5 +1,6 @@
 /* Local workbench actions share the existing snapshot and persistence queue. */
 function initializeFeatures() {
+  initializeProjectColors();
   DB.documents ||= [];
   DB.timeEntries ||= [];
   DB.experiments ||= [];

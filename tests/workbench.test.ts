@@ -430,6 +430,7 @@ test('model proposals create tasks, risks and projects only on explicit, idempot
   await w.run('applyChatAction()');
   assert.equal(w.run('DB.projects.length'), projects + 1);
   assert.equal(w.run("DB.projects.at(-1).owner"), '小陈');
+  assert.equal(w.run('new Set(DB.projects.map(p=>projectColorKey(p.color))).size'), projects + 1);
 });
 
 test('removing the last project leaves both portfolio and stale detail routes usable', async () => {
@@ -451,7 +452,9 @@ test('project forms validate, create and edit the same persisted project', async
   w.fields['project-name'].value = '验收项目';
   await w.run('saveProject()');
   const id = w.run('state.projectId');
+  const color = w.run('projectById(state.projectId).color');
   assert.equal(w.run('DB.projects.length'), 7);
+  assert.equal(w.run('new Set(DB.projects.map(p=>projectColorKey(p.color))).size'), 7);
   assert.match(w.run('renderProject()'), /&lt;script&gt;test&lt;\/script&gt;/);
   w.run(`state.editProjectId = ${JSON.stringify(id)}`);
   w.fields['project-name'].value = '已修改项目';
@@ -461,11 +464,28 @@ test('project forms validate, create and edit the same persisted project', async
   assert.equal(w.run('DB.projects.length'), 7);
   assert.equal(w.run('projectById(state.projectId).progress'), 65);
   assert.equal(w.run('projectById(state.projectId).name'), '已修改项目');
+  assert.equal(w.run('projectById(state.projectId).color'), color);
   assert.match(w.run('projectNotesFor(state.projectId)[0].text'), /65%.*\n方案已提交/);
   w.fields['project-note'].value = '校方反馈已收到';
   await w.run('saveProject()');
   assert.equal(w.run('projectNotesFor(state.projectId).length'), 2);
   assert.match(w.run('projectNotesFor(state.projectId)[1].text'), /方案已提交/);
+});
+
+test('project colors repair duplicates once, preserve unique colors and stay distinct beyond the palette', () => {
+  const w = workbench();
+  w.run(`DB.projects=[
+    {id:'first',color:'#abc'}, {id:'duplicate',color:'#AABBCC'},
+    {id:'unique',color:'#2F5BE3'}, {id:'missing'}];
+    initializeProjectColors();`);
+  assert.equal(w.run("projectById('first').color"), '#abc');
+  assert.equal(w.run("projectById('unique').color"), '#2F5BE3');
+  assert.equal(w.run('new Set(DB.projects.map(p=>projectColorKey(p.color))).size'), 4);
+  w.run(`for(let i=0;i<40;i++) DB.projects.push({id:'extra-'+i,color:nextProjectColor()});
+    window.savedColors=JSON.stringify(DB.projects); DB.projects=JSON.parse(window.savedColors);
+    DB.user.color='#000000'; initializeProjectColors();`);
+  assert.equal(w.run('new Set(DB.projects.map(p=>projectColorKey(p.color))).size'), 44);
+  assert.equal(w.run('JSON.stringify(DB.projects)'), w.run('window.savedColors'));
 });
 
 test('project task lists merge live records and reflect completion across calendar dates', () => {
@@ -836,4 +856,7 @@ test('failed saves roll back document/task/project/chat changes and new project 
   await fresh.run('saveDocumentEditor()');
   assert.equal(fresh.run('DB.projects.length'), count);
   assert.match(fresh.run('state.chatMessages.at(-1).text'), /待确认/);
+  await fresh.run('saveDocumentEditor(true)');
+  assert.equal(fresh.run('DB.projects.length'), count + 1);
+  assert.equal(fresh.run('new Set(DB.projects.map(p=>projectColorKey(p.color))).size'), count + 1);
 });

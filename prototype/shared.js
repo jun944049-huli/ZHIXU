@@ -108,6 +108,37 @@ function projectById(id) {
   return DB.projects.find(p => p.id === id) || null;
 }
 
+const PROJECT_COLORS = [
+  '#2F5BE3', '#1F8A70', '#C07A2B', '#6B5BD2', '#B85C7A', '#4C7A3F',
+  '#187F9B', '#CA5946', '#9761A2', '#82702C', '#336B61', '#526EA3'
+];
+
+function projectColorKey(color) {
+  const value = String(color || '').trim().toLowerCase();
+  return /^#[0-9a-f]{3}$/.test(value) ? '#' + [...value.slice(1)].map(c => c + c).join('') : value;
+}
+
+function nextProjectColor(projects = DB.projects) {
+  const used = new Set(projects.map(project => projectColorKey(project.color)));
+  for (const color of PROJECT_COLORS) {
+    if (!used.has(projectColorKey(color))) return color;
+  }
+  // Continue across the hue wheel instead of repeating the palette for larger portfolios.
+  for (let index = 0; ; index++) {
+    const color = `hsl(${(index * 137.508 % 360).toFixed(3)} 58% 42%)`;
+    if (!used.has(projectColorKey(color))) return color;
+  }
+}
+
+function initializeProjectColors() {
+  const seen = new Set();
+  for (const project of DB.projects) {
+    const key = projectColorKey(project.color);
+    if (!key || seen.has(key)) project.color = nextProjectColor();
+    seen.add(projectColorKey(project.color));
+  }
+}
+
 function allWorkbenchTasks() {
   return [...DB.tasks.must, ...DB.tasks.should, ...DB.tasks.could,
     ...Object.values(DB.taskCalendar || {}).flat()];

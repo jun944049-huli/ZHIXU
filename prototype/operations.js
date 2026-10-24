@@ -164,7 +164,7 @@ async function saveProject() {
   }
   const project = {
     ...(existing || {
-      id: newRecordId('project'), color: DB.user.color, planned: 0, open: 0, risks: 0,
+      id: newRecordId('project'), color: nextProjectColor(), planned: 0, open: 0, risks: 0,
       members: [{ i: DB.user.initials, c: DB.user.color }],
       createdAt: new Date().toISOString()
     }),

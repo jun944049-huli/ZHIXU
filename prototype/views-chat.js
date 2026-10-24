@@ -630,7 +630,7 @@ async function applyChatAction(mode, cardId) {
   } else if (card.type === 'project' && card.modelAction) {
     if (DB.projects.some(project => project.name === card.name)) { showToast('已有同名项目，请取消草稿并指定项目'); return; }
     DB.projects.push({ id: newRecordId('project'), name: card.name, goal: card.goal, owner: card.owner || DB.user.name,
-      code: 'PRJ', color: DB.user.color, progress: 0, health: 'green', planned: 0, open: 0, risks: 0,
+      code: 'PRJ', color: nextProjectColor(), progress: 0, health: 'green', planned: 0, open: 0, risks: 0,
       next: '未安排', nextDate: '—', updated: '刚刚', members: [{ i: DB.user.initials, c: DB.user.color }],
       createdAt: new Date().toISOString() });
     summary = '已创建项目：' + card.name;

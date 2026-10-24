@@ -445,7 +445,7 @@ async function saveDocumentEditor(apply = false) {
       const existing = DB.projects.find(project => project.name === draft.projectName);
       if (existing) throw new Error('同名项目已存在，请直接选择已有项目');
       const project = { id: newRecordId('project'), name: draft.projectName, code: 'DOC', goal: draft.summary.slice(0, 1000),
-        owner: DB.user.name, progress: 0, planned: 0, open: 0, risks: 0, health: 'green', color: DB.user.color,
+        owner: DB.user.name, progress: 0, planned: 0, open: 0, risks: 0, health: 'green', color: nextProjectColor(),
         next: '待安排', nextDate: '—', updated: '刚刚', members: [{ i: DB.user.initials, c: DB.user.color }],
         createdAt: new Date().toISOString() };
       DB.projects.push(project);
