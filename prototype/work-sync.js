@@ -2,7 +2,7 @@
 const workUpdatesInFlight = new Set();
 function canAutoSyncWork(text) {
   if (/[?？]|如果|假如|假设|是否|能否|如何|怎么|什么|请问|解释|分析|总结|完成后|完成了吗|先不|暂不|不要|别修改|吗[。！\s]*$/.test(text)) return false;
-  return /完成|做完|搞定|结束|进行中|正在.*(?:推进|部署|处理)|阻塞|卡住|重新打开|重新开始|还没完成|尚未完成/.test(text);
+  return /完成|做完|搞定|弄好|修好|结束|进行中|正在.*(?:推进|部署|处理)|阻塞|卡住|重新打开|重新开始|还没完成|尚未完成|记录|备注|已.*(?:确认|沟通|提交|交付)|进度.*\d+\s*%/.test(text);
 }
 
 function workUpdateReferences(updates, context) {
@@ -16,6 +16,7 @@ function workUpdateReferences(updates, context) {
 function modelWorkUpdateCard(updates, raw, context = modelChatContext()) {
   updates = [...new Set(updates.map(action => action.projectId))].map(projectId => ({
     projectId, type: 'work_update',
+    note: updates.filter(action => action.projectId === projectId).map(action => action.note).filter(Boolean).join('\n'),
     tasks: updates.filter(action => action.projectId === projectId).flatMap(action => action.tasks),
     milestones: updates.filter(action => action.projectId === projectId).flatMap(action => action.milestones)
   }));
@@ -26,7 +27,9 @@ function modelWorkUpdateCard(updates, raw, context = modelChatContext()) {
       const task = context.tasks.find(item => item.id === update.taskId);
       items.push({ label: project?.name || '项目已移除', value: `${task?.title || '任务已移除'} → ${
         { todo: '待开始', doing: '进行中', blocked: '阻塞', done: '已完成' }[update.status]}` });
+      if (update.note) items.push({ label: '任务备注', value: update.note });
     }
+    if (action.note) items.push({ label: '项目备注', value: action.note });
     for (const update of action.milestones) {
       const milestone = context.milestones.find(item => item.id === update.milestoneId);
       items.push({ label: '里程碑', value: `${milestone?.name || '节点已移除'} → ${update.status === 'done' ? '已完成' : update.status === 'risk' ? '有风险' : '未完成'}` });
@@ -67,34 +70,49 @@ function validateWorkUpdateCard(card) {
 function applyWorkUpdateCard(card) {
   validateWorkUpdateCard(card);
   const summaries = [];
+  const timestamp = new Date().toISOString();
   for (const action of card.updates) {
     const project = projectById(action.projectId);
     const before = project.progress;
-    for (const update of action.tasks) setWorkTaskStatus(taskLocation(update.taskId).task, update.status, update.progress);
+    let changed = false;
+    for (const update of action.tasks) {
+      const task = taskLocation(update.taskId).task;
+      if (update.status !== workTaskStatus(task) ||
+          (update.progress !== undefined && update.progress !== taskWorkProgress(task))) {
+        changed = true;
+        setWorkTaskStatus(task, update.status, update.progress);
+      }
+      appendTaskNote(task, update.note || `${{ todo: '待开始', doing: '进行中', blocked: '阻塞', done: '已完成' }[workTaskStatus(task)]}，完成进度 ${taskWorkProgress(task)}%。`,
+        { raw: card.raw, source: '对话任务备注', updateId: card.id, createdAt: timestamp,
+          status: workTaskStatus(task), progress: taskWorkProgress(task) });
+    }
     for (const update of action.milestones) {
       const milestone = DB.projectDetails[project.id].milestones.find(item => item.id === update.milestoneId);
+      if (milestone.status !== update.status || update.taskIds?.some(id => !milestoneTaskIds(project.id, milestone).includes(id))) changed = true;
       if (update.taskIds) milestone.taskIds = [...new Set([...milestoneTaskIds(project.id, milestone), ...update.taskIds])];
       milestone.status = update.status;
       milestone.completedAt = update.status === 'done' ? milestone.completedAt || new Date().toISOString() : null;
     }
-    reconcileProjectWork([project.id]);
+    if (changed) reconcileProjectWork([project.id]);
     const tasks = allWorkbenchTasks().filter(task => task.project === project.id);
     const milestones = projectMilestones(project.id);
     const statuses = ['done', 'doing', 'blocked', 'todo'].map(status => {
       const count = action.tasks.filter(task => task.status === status).length;
       return count ? `${{ done: '已完成', doing: '进行中', blocked: '阻塞', todo: '待开始' }[status]} ${count} 项` : '';
     }).filter(Boolean).join('、');
-    summaries.push(`${project.name}：已同步 ${action.tasks.length} 项任务${statuses ? `（${statuses}）` : ''}${action.milestones.length ? `、${action.milestones.length} 个里程碑` : ''}。\n` +
+    summaries.push(!action.tasks.length && !action.milestones.length ? `${project.name}：已追加项目备注。\n${action.note}` :
+      `${project.name}：已同步 ${action.tasks.length} 项任务${statuses ? `（${statuses}）` : ''}${action.milestones.length ? `、${action.milestones.length} 个里程碑` : ''}。\n` +
       `任务 ${tasks.filter(task => task.done).length}/${tasks.length} 已完成；里程碑 ${milestones.filter(item => item.status === 'done').length}/${milestones.length} 已完成。\n` +
       `项目进度 ${before}% → ${project.progress}%（按${tasks.length ? '任务' : '里程碑'}完成比例${project.progress === 99 && tasks.every(task => task.done) ? '，尚有里程碑未完成' : ''}）。` +
       (project.next !== '项目已完成' ? `下一步：${project.next}。` : '项目已完成。'));
-    const timestamp = new Date().toISOString();
-    const note = { id: newRecordId('note'), time: '现在', text: summaries.at(-1), raw: card.raw,
-      source: '对话状态同步', author: DB.user.name, createdAt: timestamp, updateId: card.id };
-    projectNotesFor(project.id).unshift(note);
-    DB.projectDetails[project.id].activity.unshift({ time: '现在', text: summaries.at(-1), tone: 'green', updateId: card.id });
+    appendProjectNote(project.id, action.note || summaries.at(-1), { raw: card.raw,
+      source: '对话状态同步', createdAt: timestamp, updateId: card.id });
+    DB.projectDetails[project.id] ||= detailForProject(project);
+    DB.projectDetails[project.id].activity ||= [];
+    DB.projectDetails[project.id].activity.unshift({ time: noteTimestamp({ createdAt: timestamp }),
+      text: action.note || summaries.at(-1), tone: 'green', updateId: card.id });
   }
-  return summaries.join('\n\n') + '\n今日数量、逾期提醒和报表已同步。';
+  return summaries.join('\n\n') + '\n进展备注已按时间保存。';
 }
 
 async function applyWorkUpdateMessage(message, automatic = false) {
@@ -114,7 +132,9 @@ async function applyWorkUpdateMessage(message, automatic = false) {
     await persistWorkbench();
     showToast('工作状态与项目进度已同步');
   } catch (error) {
-    Object.assign(DB, JSON.parse(backup));
+    const snapshot = JSON.parse(backup);
+    for (const key of Object.keys(DB)) if (!Object.hasOwn(snapshot, key)) delete DB[key];
+    Object.assign(DB, snapshot);
     card.status = 'pending';
     card.items = previousItems;
     card.title = '工作状态尚未同步';

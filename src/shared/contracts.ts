@@ -172,13 +172,15 @@ const workTaskStatus = z.enum(['todo', 'doing', 'blocked', 'done']);
 export const chatActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('work_update'), projectId: z.string().min(1).max(150),
     requiresConfirmation: z.boolean().default(false),
+    note: z.string().trim().max(4000).default(''),
     tasks: z.array(z.object({ taskId: z.string().min(1).max(150), status: workTaskStatus,
-      progress: z.number().int().min(0).max(100).optional() })).max(150).default([]),
+      progress: z.number().int().min(0).max(100).optional(),
+      note: z.string().trim().max(4000).default('') })).max(150).default([]),
     milestones: z.array(z.object({ milestoneId: z.string().min(1).max(150),
       status: z.enum(['open', 'risk', 'done']),
       taskIds: z.array(z.string().min(1).max(150)).min(1).max(150).optional()
     })).max(100).default([])
-  }).refine(value => value.tasks.length + value.milestones.length > 0, '需要指定更新对象'),
+  }).refine(value => value.tasks.length + value.milestones.length > 0 || !!value.note, '需要指定更新对象或项目备注'),
   z.object({ type: z.literal('task'), projectId: projectReference, title: z.string().trim().min(1).max(200),
     due: optionalDate, date: optionalDate, assignee: z.string().max(100).default(''),
     estimateHours: z.number().min(0).max(200).default(0), priority: z.enum(['P0', 'P1', 'P2', 'P3', 'P4']).default('P2') }),

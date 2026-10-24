@@ -123,14 +123,24 @@ function openTaskEditor(id) {
     ${inputField('task-title', '任务标题', t.title, 'text', 'maxlength="200"')}
     ${selectField('task-project', '项目', projectChoices(), t.project || '')}
     ${inputField('task-date', '安排日期', found.date, 'date')}
-    ${inputField('task-due', '截止说明', t.due)}
+    <div class="field"><label for="task-due">截止日期</label>
+      <input class="input" id="task-due" type="date" value="${esc(taskDeadlineDate(t) || '')}">
+      ${t.dueDescription || (t.due && !/^\d{4}-\d{2}-\d{2}$/.test(t.due)) ?
+        `<p class="small muted task-legacy-due">原截止说明：${esc(t.dueDescription || t.due)}</p>` : ''}</div>
     ${inputField('task-hours', '预计小时 · 0 为待估时', parseEstimateHours(t.estimate), 'number', 'min="0" max="1000" step="0.1"')}
     ${selectField('task-priority', '优先级', ['P0', 'P1', 'P2', 'P3', 'P4'].map(p => [p, p]), t.priority)}
     ${selectField('task-status', '状态', [['open', '待开始'], ['doing', '进行中'], ['blocked', '阻塞'], ['done', '已完成']],
       t.done ? 'done' : t.blocked ? 'blocked' : t.status === '进行中' ? 'doing' : 'open')}
     ${inputField('task-assignee', '负责人', t.assignee || DB.user.name)}
+    ${inputField('task-progress', '完成进度（%）', taskWorkProgress(t), 'number', 'min="0" max="100" step="1"')}
     ${textField('task-details', '详细', t.details || '')}
-    ${textField('task-note', '备注', t.note || '')}
+    ${textField('task-note', '新增进展备注')}
+    <section class="task-note-history full" aria-label="进展记录"><h3>进展记录 <span class="count-badge">${taskNotesFor(t).length}</span></h3>
+      ${taskNotesFor(t).map(note => `<article class="task-history-entry">
+        <div class="task-history-meta"><time>${esc(noteTimestamp(note))}</time><span>${esc(note.source || '备注')} · ${esc(note.author || '—')}</span></div>
+        <p>${esc(note.text)}</p>
+        ${note.raw && note.raw !== note.text ? `<details><summary>原文</summary><p>${esc(note.raw)}</p></details>` : ''}
+      </article>`).join('') || '<p class="small muted">暂无记录</p>'}</section>
     ${customFieldInputs('task', t)}</div>`,
     `<button class="btn btn-danger" data-action="task-delete">${icon('trash', 13)} 删除任务</button>${saveButton('task-save')}`, 'task-editor');
 }
@@ -139,23 +149,36 @@ async function saveTaskEditor() {
   const found = taskLocation(state.editTaskId);
   const hours = Number(fieldValue('task-hours'));
   const date = fieldValue('task-date');
+  const due = fieldValue('task-due');
+  const progressField = document.getElementById('task-progress');
+  const progress = progressField ? Number(progressField.value) : undefined;
   if (!found || !fieldValue('task-title') || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
       toISODate(parseISODate(date)) !== date || hours < 0 || hours > 1000 || !Number.isFinite(hours)) {
     showToast('请填写标题、日期和有效的预计小时'); return;
   }
+  if (document.getElementById('task-due')?.checkValidity?.() === false ||
+      (due && (!/^\d{4}-\d{2}-\d{2}$/.test(due) || toISODate(parseISODate(due)) !== due)) ||
+      (progressField && (!progressField.value || !Number.isInteger(progress) || progress < 0 || progress > 100))) {
+    showToast('请选择有效的截止日期，进度须为 0 到 100 的整数'); return;
+  }
   const t = found.task;
+  const previousStatus = workTaskStatus(t);
+  const previousProgress = taskWorkProgress(t);
   const previousProject = t.project;
+  const previousTitle = t.title;
   const previousDue = String(t.due || '');
   const previousDeadline = taskDeadlineDate(t);
   const status = fieldValue('task-status');
-  if (status) {
-    setWorkTaskStatus(t, status === 'open' ? 'todo' : status);
+  if (status && ((status === 'open' ? 'todo' : status) !== previousStatus ||
+      (progress !== undefined && progress !== previousProgress))) {
+    setWorkTaskStatus(t, status === 'open' ? 'todo' : status, progress);
   }
+  if (previousDue && !/^\d{4}-\d{2}-\d{2}$/.test(previousDue)) t.dueDescription ||= previousDue;
   Object.assign(t, {
     title: fieldValue('task-title'), project: fieldValue('task-project') || null,
-    due: fieldValue('task-due'), estimate: hours ? `${hours}h` : '待估时', priority: fieldValue('task-priority'),
+    due, estimate: hours ? `${hours}h` : '待估时', priority: fieldValue('task-priority'),
     details: document.getElementById('task-details') ? fieldValue('task-details') : t.details || '',
-    assignee: fieldValue('task-assignee'), note: fieldValue('task-note'), customValues: { ...t.customValues, ...readCustomFields('task') }
+    assignee: fieldValue('task-assignee'), customValues: { ...t.customValues, ...readCustomFields('task') }
   });
   if (t.due !== previousDue) {
     delete t.deadlineDate;
@@ -165,9 +188,15 @@ async function saveTaskEditor() {
     t.deadlineDate = date;
   }
   t.overdue = isTaskOverdue(t);
+  const remark = fieldValue('task-note');
+  const changed = previousStatus !== workTaskStatus(t) || previousProgress !== taskWorkProgress(t);
+  if (remark || changed) appendTaskNote(t,
+    [changed ? `${t.status}，完成进度 ${taskWorkProgress(t)}%。` : '', remark].filter(Boolean).join('\n'),
+    { raw: remark, status: workTaskStatus(t), progress: taskWorkProgress(t) });
   found.list.splice(found.index, 1);
-  addConfirmedTask(t, date, ['P0', 'P1'].includes(t.priority) ? 'must' : t.priority === 'P4' ? 'could' : 'should');
-  reconcileProjectWork([previousProject, t.project]);
+  addConfirmedTask(t, date, ['P0', 'P1'].includes(t.priority) ? 'must' : t.priority === 'P4' ? 'could' : 'should', false);
+  if (changed || previousProject !== t.project || previousTitle !== t.title ||
+      previousDeadline !== taskDeadlineDate(t) || date !== found.date) reconcileProjectWork([previousProject, t.project]);
   await finishLocal('任务已保存');
 }
 

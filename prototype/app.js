@@ -462,6 +462,13 @@ function handleKeydown(e) {
 }
 
 function handleChange(e) {
+  if (e.target.id === 'task-status') {
+    const progress = document.getElementById('task-progress');
+    if (progress && (e.target.value === 'done' || Number(progress.value) === 100)) {
+      progress.value = e.target.value === 'done' ? '100' : '0';
+    }
+    return;
+  }
   if (e.target.id === 'profile-photo') { void importProfilePhoto(e.target); return; }
   if (e.target.id === 'text-file') {
     state.documentImportResults = new Map();

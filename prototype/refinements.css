@@ -525,6 +525,19 @@ summary { cursor: pointer; }
 }
 /* Plugins share the connector grid, with a separate installation lifecycle. */
 .milestone-links { max-height: 240px; overflow: auto; }
+.task-history-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; padding: 2px 0; color: var(--ink-3); font-size: 12px; cursor: pointer; background: transparent; border: 0; }
+.task-history-link:hover { color: var(--ink); }
+.task-note-history { min-width: 0; border-top: 1px solid var(--line); padding-top: 20px; }
+.task-note-history h3 { display: flex; align-items: center; gap: 8px; font-size: 15px; margin: 0 0 12px; }
+.task-history-entry { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.task-history-entry:last-child { border-bottom: 0; }
+.task-history-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.task-history-entry p { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.7; }
+.task-history-entry summary, .note-raw summary { margin-top: 8px; color: var(--ink-3); cursor: pointer; font-size: 12px; }
+.task-legacy-due { margin: 6px 0 0; overflow-wrap: anywhere; }
+.note-table th:first-child, .note-table td:first-child { width: 164px; }
+.note-table .note-time { font-size: 12px; }
+.note-text, .note-raw { white-space: pre-wrap; overflow-wrap: anywhere; }
 .milestone-task-choice { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; overflow-wrap: anywhere; }
 .milestone-task-choice input { flex: 0 0 auto; margin-top: 4px; }
 .chat-bubble { overflow-wrap: anywhere; }

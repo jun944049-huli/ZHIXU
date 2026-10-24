@@ -76,12 +76,20 @@ test('Q&A and semantic commands use the selected model with history and validate
     returnedModel = ' ';
     assert.equal((await chat(input)).model, 'selected-model');
     answer = { reply: '将同步维修任务。', actions: [
-      { type: 'work_update', projectId: 'p1', tasks: [{ taskId: 'repair-a', status: 'done' }],
+      { type: 'work_update', projectId: 'p1', note: '灯具维修交付完成',
+        tasks: [{ taskId: 'repair-a', status: 'done', note: '灯具已修复，现场检查通过' }],
         milestones: [{ milestoneId: 'repair-ms', status: 'done', taskIds: ['repair-a'] }] },
       { type: 'progress', projectId: 'p1', progress: 100 }] };
     const completion = await chat(input);
     assert.equal(completion.actions.length, 1);
     assert.equal(completion.actions[0].type, 'work_update');
+    assert.equal(completion.actions[0].type === 'work_update' && completion.actions[0].tasks[0].note, '灯具已修复，现场检查通过');
+    assert.match(bodies.at(-1).messages[0].content, /不覆盖历史/);
+    answer = { reply: '请确认项目备注。', actions: [
+      { type: 'work_update', projectId: 'p1', note: '校方已确认方案，等待采购回复', tasks: [], milestones: [] }] };
+    const noteOnly = await chat(input);
+    assert.equal(noteOnly.actions.length, 1);
+    assert.equal(noteOnly.actions[0].type === 'work_update' && noteOnly.actions[0].note, '校方已确认方案，等待采购回复');
     answer = { reply: '无效对象不能更新。', actions: [
       { type: 'work_update', projectId: 'p1', tasks: [{ taskId: 'other', status: 'done' }], milestones: [] },
       { type: 'work_update', projectId: 'p1', tasks: [], milestones: [{ milestoneId: 'missing', status: 'done' }] }] };
@@ -97,6 +105,6 @@ test('Q&A and semantic commands use the selected model with history and validate
       return true;
     });
     await assert.rejects(chat({ ...input, messages: [{ role: 'assistant', content: '不应由助手结束' }] }), /用户问题/);
-    assert.equal(bodies.length, 9);
+    assert.equal(bodies.length, 10);
   } finally { server.closeAllConnections(); server.close(); }
 });

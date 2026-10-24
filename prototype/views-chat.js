@@ -271,11 +271,12 @@ function refineProjectNoteWithAI(note, raw, projectId, activity) {
   if (provider.id === 'local') return;
   requestAIPolish(raw, '简洁', provider)
     .then(result => {
-      if (!result || !note) return;
+      if (!result || !note || !DB.projectNotes?.[projectId]?.includes(note)) return;
       note.text = result;
       saveProjectNotes();
       if (activity) activity.text = '新增项目记录：' + (result.length > 36 ? result.slice(0, 36) + '…' : result);
       if (state.view === 'project' && state.projectId === projectId && state.projectTab === 'notes') render();
+      return persistWorkbench();
     })
     .catch(() => { /* keep the local polish */ });
 }
@@ -287,19 +288,11 @@ function autoLogProjectNote(text, projectId) {
   if (!raw) return null;
 
   const polished = polishProjectNote(raw) || raw;
-  const note = {
-    id: 'n-' + Date.now(),
-    time: '现在',
-    text: polished,
-    raw,
-    source: '对话',
-    author: DB.user.name
-  };
-  projectNotesFor(p.id).unshift(note);
+  const note = appendProjectNote(p.id, polished, { raw, source: '对话' });
 
   if (!DB.projectDetails[p.id]) DB.projectDetails[p.id] = detailForProject(p);
   const activity = {
-    time: '现在',
+    time: noteTimestamp(note),
     text: '新增项目记录：' + (polished.length > 36 ? polished.slice(0, 36) + '…' : polished),
     tone: 'accent'
   };
@@ -443,7 +436,8 @@ function modelChatContext() {
     id: task.id, title: task.title, projectId: task.project || null, done: !!task.done,
     status: workTaskStatus(task), progress: taskWorkProgress(task),
     due: task.due, date: taskDates.get(task.id), assignee: task.assignee || '', estimate: task.estimate, priority: task.priority,
-    details: String(task.details || '').slice(0, 2000)
+    details: String(task.details || '').slice(0, 2000),
+    notes: taskNotesFor(task).slice(0, 3).map(note => ({ text: String(note.text).slice(0, 600), time: noteTimestamp(note) }))
   }));
   const projects = DB.projects.filter(project => !selected || project.id === selected).slice(0, 100)
     .map(project => ({ id: project.id, name: project.name, progress: project.progress,

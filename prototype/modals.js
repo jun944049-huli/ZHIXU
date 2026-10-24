@@ -94,6 +94,7 @@ function openProjectEditor(id, focusStakeholders = false) {
             <input class="input" id="project-code" maxlength="20" value="${esc(p.code)}"></div>
           <div class="field"><label for="project-progress">完成进度（%）</label>
             <input class="input" id="project-progress" type="number" min="0" max="100" step="1" value="${p.progress}"></div>
+            ${textField('project-note', '新增项目备注')}
           <div class="field"><label for="project-health">健康度</label>
             <select class="select" id="project-health">
               ${['green', 'amber', 'red'].map(h => `<option value="${h}" ${p.health === h ? 'selected' : ''}>${healthLabel(h)}</option>`).join('')}

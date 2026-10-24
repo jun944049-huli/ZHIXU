@@ -245,6 +245,48 @@ function saveProjectNotes() {
   } catch (e) { /* ignore */ }
 }
 
+function noteTimestamp(note) {
+  const date = note.createdAt ? new Date(note.createdAt) : null;
+  if (!date || !Number.isFinite(date.getTime())) {
+    return note.time && !['现在', '刚刚'].includes(note.time) ? note.time : '时间未记录';
+  }
+  return `${toISODate(date)} ${[date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map(value => String(value).padStart(2, '0')).join(':')}`;
+}
+
+function taskNotesFor(task) {
+  task.noteHistory ||= [];
+  if (task.note && !task.noteHistory.some(note => note.id === `legacy-${task.id}`)) {
+    task.noteHistory.push({ id: `legacy-${task.id}`, text: task.note, source: '原有备注', createdAt: null });
+  }
+  return task.noteHistory;
+}
+
+function appendProjectNote(projectId, text, metadata = {}) {
+  if (!projectById(projectId) || !String(text || '').trim()) return null;
+  const notes = projectNotesFor(projectId);
+  if (metadata.updateId) {
+    const existing = notes.find(note => note.updateId === metadata.updateId && note.taskId === metadata.taskId);
+    if (existing) return existing;
+  }
+  const note = { id: newRecordId('note'), text: String(text).trim(), author: DB.user.name,
+    source: '手动更新', ...metadata, createdAt: metadata.createdAt || new Date().toISOString() };
+  notes.unshift(note);
+  saveProjectNotes();
+  return note;
+}
+
+function appendTaskNote(task, text, metadata = {}) {
+  if (!String(text || '').trim()) return null;
+  const history = taskNotesFor(task);
+  if (metadata.updateId && history.some(note => note.updateId === metadata.updateId)) return null;
+  const note = { id: newRecordId('note'), text: String(text).trim(), author: DB.user.name,
+    source: '手动更新', ...metadata, createdAt: metadata.createdAt || new Date().toISOString() };
+  history.unshift(note);
+  appendProjectNote(task.project, `${task.title}：${note.text}`, { ...note, taskId: task.id, taskTitle: task.title });
+  return note;
+}
+
 function parseISODate(iso) {
   const parts = String(iso || '').split('-').map(Number);
   if (parts.length !== 3 || parts.some(Number.isNaN)) return new Date();

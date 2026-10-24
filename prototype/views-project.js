@@ -144,7 +144,7 @@ function renderProject() {
     { id: 'tasks', label: '任务', count: projectTasks.length },
     { id: 'milestones', label: '里程碑', count: detail.milestones.length },
     { id: 'risks', label: '风险', count: detail.risks.length },
-    { id: 'notes', label: '项目表', count: notes.length },
+    { id: 'notes', label: '进展记录', count: notes.length },
     { id: 'docs', label: '文档', count: detail.docs.length }
   ];
 
@@ -200,10 +200,10 @@ function renderProject() {
 
   const noteRows = notes.map(n => `
     <tr>
-      <td class="note-time">${esc(n.time)}</td>
+      <td class="note-time">${esc(noteTimestamp(n))}</td>
       <td>
         <div class="note-text">${esc(n.text)}</div>
-        ${n.raw && n.raw !== n.text ? `<div class="note-raw">原文：${esc(n.raw)}</div>` : ''}
+        ${n.raw && n.raw !== n.text ? `<details class="note-raw"><summary>原文</summary>${esc(n.raw)}</details>` : ''}
       </td>
       <td><span class="chip">${esc(n.source || '对话')}</span></td>
       <td class="muted">${esc(n.author || DB.user.name)}</td>
@@ -252,6 +252,7 @@ function renderProject() {
       <td>
         <div class="risk-title">${esc(t.title)}</div>
         <div class="risk-action">${esc(t.estimate)} · ${esc(t.due)}</div>
+        <button class="task-history-link" data-action="task-edit" data-id="${esc(t.id)}" title="添加备注或查看全部进展记录">${icon('message', 12)} 备注${taskNotesFor(t).length ? ` · ${taskNotesFor(t).length}` : ''}</button>
       </td>
       <td><span class="status-pill ${statusClass(t.status)}">${esc(t.status)}</span></td>
       <td><span class="priority ${t.priority.toLowerCase()}">${t.priority}</span></td>
@@ -376,7 +377,7 @@ function renderProject() {
     tabContent = `
       <div class="card">
         <div class="panel-head">
-          <h3>${icon('table', 15)} 项目表 <span class="count-badge">${notes.length}</span></h3>
+          <h3>${icon('table', 15)} 进展记录 <span class="count-badge">${notes.length}</span></h3>
           <div class="row gap-6">
             <span class="chip green">${icon('sparkles', 10)} 自动润色</span>
             <button class="btn btn-sm" data-action="chat-with-project" data-id="${p.id}">${icon('message', 12)} 用对话记录</button>

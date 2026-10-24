@@ -102,12 +102,14 @@ function toggleTask(id) {
     ...Object.values(DB.taskCalendar || {}).flat()].find(t => t.id === id);
   if (!task) return;
   setWorkTaskStatus(task, task.done ? 'todo' : 'done');
+  appendTaskNote(task, `${task.status}，完成进度 ${taskWorkProgress(task)}%。`,
+    { source: '状态更新', status: workTaskStatus(task), progress: taskWorkProgress(task) });
   reconcileProjectWork([task.project]);
   render();
   void persistWorkbench().catch(() => {});
 }
 
-function addConfirmedTask(task, date, bucket) {
+function addConfirmedTask(task, date, bucket, reconcile = true) {
   task.scheduledDate = date;
   if (date === DB.meta.today) DB.tasks[bucket].push(task);
   else {
@@ -116,7 +118,7 @@ function addConfirmedTask(task, date, bucket) {
     DB.taskCalendar[date].push(task);
   }
   updateTaskCapacity();
-  if (projectById(task.project)?.progressSource) reconcileProjectWork([task.project]);
+  if (reconcile && projectById(task.project)?.progressSource) reconcileProjectWork([task.project]);
 }
 
 function readProjectStakeholders() {
@@ -145,6 +147,7 @@ async function saveProject() {
     return;
   }
   const existing = state.editProjectId ? projectById(state.editProjectId) : null;
+  const previousProgress = existing?.progress;
   if (state.editProjectId && !existing) { showToast('项目已不存在'); return; }
   const stakeholders = readProjectStakeholders();
   if (stakeholders) {
@@ -186,6 +189,10 @@ async function saveProject() {
   }
   if (existing) Object.assign(existing, project);
   else DB.projects.push(project);
+  const remark = fieldValue('project-note');
+  if (remark || (existing && progress !== previousProgress)) {
+    appendProjectNote(project.id, [`项目完成进度 ${progress}%。`, remark].filter(Boolean).join('\n'), { raw: remark });
+  }
   closeModal();
   state.view = 'project';
   state.projectId = project.id;

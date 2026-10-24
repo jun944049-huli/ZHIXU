@@ -93,8 +93,11 @@ function mergeDocumentWorkRecords(task, doc) {
   const records = validateDocumentMerge(ids);
   if (records.some(record => record.sourceDocumentId !== doc.id)) throw new Error('只能合并此附件生成的任务');
   const primary = records[0];
+  const history = records.flatMap(taskNotesFor);
   const items = JSON.parse(JSON.stringify(records.flatMap(record => record.workItems?.length ? record.workItems : [record])));
   primary.workItems = items;
+  primary.noteHistory = [...new Map(history.map(note => [note.id, note])).values()]
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   const complete = items.every(item => item.done);
   primary.done = complete;
   primary.blocked = !complete && items.some(item => item.blocked);

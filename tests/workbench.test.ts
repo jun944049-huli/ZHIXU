@@ -222,6 +222,111 @@ test('relative deadlines stay anchored across day rollover and invalid task date
   assert.equal(w.run("taskLocation('relative').task.title"), '相对日期');
 });
 
+test('task remarks append timestamped rows, retain originals and survive snapshot reload without duplication', async () => {
+  const w = workbench(); seedWorkUpdate(w);
+  w.run("state.editTaskId='repair-a'; taskLocation('repair-a').task.note='原始附件说明'");
+  for (const [key, value] of Object.entries({
+    title: '维修灯具', project: 'p1', date: w.run('DB.meta.today'), due: '2026-11-01', hours: '1',
+    priority: 'P2', status: 'doing', progress: '40', assignee: 'QA', note: '已检查线路，等待更换配件'
+  })) w.fields['task-' + key] = { value, checkValidity: () => true };
+  await w.run('saveTaskEditor()');
+  const first = w.run("JSON.stringify(taskNotesFor(taskLocation('repair-a').task))");
+  w.fields['task-note'].value = '配件已更换，验收通过';
+  w.fields['task-status'].value = 'done';
+  await w.run('saveTaskEditor()');
+  assert.equal(w.run("taskLocation('repair-a').task.note"), '原始附件说明');
+  assert.equal(w.run("taskNotesFor(taskLocation('repair-a').task).length"), 3);
+  assert.equal(w.run("taskNotesFor(taskLocation('repair-a').task)[0].progress"), 100);
+  assert.match(w.run("taskNotesFor(taskLocation('repair-a').task)[0].text"), /验收通过/);
+  assert.equal(w.run("JSON.stringify(taskNotesFor(taskLocation('repair-a').task).slice(1))"), first);
+  assert.match(w.run("noteTimestamp(taskNotesFor(taskLocation('repair-a').task)[0])"), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.equal(w.run("noteTimestamp(taskNotesFor(taskLocation('repair-a').task)[2])"), '时间未记录');
+  assert.equal(w.run("projectNotesFor('p1').filter(note=>note.taskId==='repair-a').length"), 2);
+  const saved = w.saved.at(-1);
+  assert.equal(typeof saved, 'string');
+  w.run(`Object.assign(DB,JSON.parse(${JSON.stringify(saved)})); initializeFeatures()`);
+  assert.equal(w.run("taskNotesFor(taskLocation('repair-a').task).length"), 3);
+  assert.equal(w.run("taskNotesFor(taskLocation('repair-a').task).length"), 3);
+  w.fields['task-note'].value = '';
+  await w.run('saveTaskEditor()');
+  assert.equal(w.run("taskNotesFor(taskLocation('repair-a').task).length"), 3);
+});
+
+test('chat retains project-language task notes and raw text, and failed persistence rolls back both timelines', async () => {
+  const w = workbench(); seedWorkUpdate(w);
+  w.run(`window.repairUpdate.note='维修工程已完成，设备部署待推进';
+    window.repairUpdate.tasks[0].note='灯具维修已完成，现场检查通过';
+    window.repairUpdate.tasks[1].note='门窗维修已完成';
+    state.chatMessages=[{text:'确认同步',actionCard:modelWorkUpdateCard([window.repairUpdate],'灯都弄好啦，检查也过了')}];`);
+  await w.run('applyWorkUpdateMessage(state.chatMessages[0])');
+  assert.equal(w.run("taskNotesFor(taskLocation('repair-a').task)[0].text"), '灯具维修已完成，现场检查通过');
+  assert.equal(w.run("taskNotesFor(taskLocation('repair-a').task)[0].raw"), '灯都弄好啦，检查也过了');
+  assert.equal(w.run("projectNotesFor('p1')[0].text"), '维修工程已完成，设备部署待推进');
+  assert.match(w.run("projectNotesFor('p1')[0].createdAt"), /T/);
+  assert.equal(w.run("taskNotesFor(taskLocation('other').task).length"), 0);
+  const history = w.run("JSON.stringify(DB.projectNotes)");
+  w.run(`state.chatMessages.push({text:'确认同步',actionCard:modelWorkUpdateCard([{
+    type:'work_update',projectId:'p1',tasks:[{taskId:'deploy',status:'doing',note:'部署已启动'}],milestones:[]
+  }],'部署开始了')}); persistWorkbench=async()=>{throw Error('存储失败')}`);
+  await w.run('applyWorkUpdateMessage(state.chatMessages.at(-1))');
+  assert.equal(w.run("taskNotesFor(taskLocation('deploy').task).length"), 0);
+  assert.equal(w.run("JSON.stringify(DB.projectNotes)"), history);
+  assert.equal(w.run("taskLocation('deploy').task.status"), undefined);
+});
+
+test('note-only updates preserve partial completion and project progress, and render every record safely', async () => {
+  const w = workbench(); seedWorkUpdate(w);
+  const progress = w.run("projectById('p1').progress");
+  w.run(`Object.assign(taskLocation('repair-a').task,{status:'进行中',progress:50,
+    workItems:[{done:true,progress:100},{done:false,progress:0}]});
+    window.noteUpdate={type:'work_update',projectId:'p1',note:'灯具型号已与校方确认',
+      tasks:[{taskId:'repair-a',status:'doing',progress:50,note:'已确认灯具型号，等待配件'}],milestones:[]};
+    applyWorkUpdateCard(modelWorkUpdateCard([window.noteUpdate],'配件还没来，型号已经确认'));`);
+  assert.equal(w.run("taskLocation('repair-a').task.workItems[0].done"), true);
+  assert.equal(w.run("taskLocation('repair-a').task.workItems[1].done"), false);
+  assert.equal(w.run("projectById('p1').progress"), progress);
+  w.run("state.editTaskId='repair-a'");
+  for (const [key, value] of Object.entries({
+    title:'维修灯具',project:'p1',date:w.run("taskLocation('repair-a').date"),
+    due:w.run("taskDeadlineDate(taskLocation('repair-a').task)"),hours:'1',priority:'P2',
+    status:'doing',progress:'50',note:'采购已回复，预计明日到货'
+  })) w.fields['task-' + key] = { value, checkValidity: () => true };
+  await w.run('saveTaskEditor()');
+  assert.equal(w.run("projectById('p1').progress"), progress);
+  assert.equal(w.run("taskLocation('repair-a').task.workItems[0].done"), true);
+  w.run(`window.noteUpdate={type:'work_update',projectId:'p1',note:'<script>项目纪要</script>',tasks:[],milestones:[]};
+    applyWorkUpdateCard(modelWorkUpdateCard([window.noteUpdate],'帮我记一下项目纪要'));
+    state.projectId='p1'; state.projectTab='notes';`);
+  assert.equal(w.run("projectById('p1').progress"), progress);
+  const html = w.run('renderProject()');
+  assert.match(html, /&lt;script&gt;项目纪要&lt;\/script&gt;/);
+  assert.match(html, /已确认灯具型号/);
+  assert.match(html, /灯具型号已与校方确认/);
+  assert.doesNotMatch(html, /<script>/);
+});
+
+test('deadline picker accepts exact dates or clearing, preserves legacy wording and rejects invalid dates', async () => {
+  const w = workbench(); seedWorkUpdate(w);
+  w.run("state.editTaskId='repair-a'; taskLocation('repair-a').task.due='待校方确认'; delete taskLocation('repair-a').task.deadlineDate");
+  for (const [key, value] of Object.entries({
+    title:'维修灯具',project:'p1',date:w.run('DB.meta.today'),due:'2026-02-30',hours:'1',priority:'P2',note:'尚未写入'
+  })) w.fields['task-' + key] = { value, checkValidity: () => true };
+  await w.run('saveTaskEditor()');
+  assert.equal(w.run("taskLocation('repair-a').task.due"), '待校方确认');
+  assert.equal(w.run("taskNotesFor(taskLocation('repair-a').task).length"), 0);
+  w.fields['task-due'].value = '2026-11-05';
+  await w.run('saveTaskEditor()');
+  assert.equal(w.run("taskLocation('repair-a').task.dueDescription"), '待校方确认');
+  assert.equal(w.run("taskDeadlineDate(taskLocation('repair-a').task)"), '2026-11-05');
+  w.fields['task-due'].value = '';
+  w.fields['task-note'].value = '';
+  await w.run('saveTaskEditor()');
+  assert.equal(w.run("taskDeadlineDate(taskLocation('repair-a').task)"), null);
+  assert.equal(w.run("isTaskOverdue(taskLocation('repair-a').task)"), false);
+  w.run('initializeFeatures()');
+  assert.equal(w.run("taskDeadlineDate(taskLocation('repair-a').task)"), null);
+});
+
 test('project removal preserves linked tasks across all dates and archives notes', async () => {
   const w = workbench();
   const before = w.run('allWorkbenchTasks().length');
@@ -351,10 +456,16 @@ test('project forms validate, create and edit the same persisted project', async
   w.run(`state.editProjectId = ${JSON.stringify(id)}`);
   w.fields['project-name'].value = '已修改项目';
   w.fields['project-progress'].value = '65';
+  w.fields['project-note'] = { value: '方案已提交，等待校方反馈', checkValidity: () => true };
   await w.run('saveProject()');
   assert.equal(w.run('DB.projects.length'), 7);
   assert.equal(w.run('projectById(state.projectId).progress'), 65);
   assert.equal(w.run('projectById(state.projectId).name'), '已修改项目');
+  assert.match(w.run('projectNotesFor(state.projectId)[0].text'), /65%.*\n方案已提交/);
+  w.fields['project-note'].value = '校方反馈已收到';
+  await w.run('saveProject()');
+  assert.equal(w.run('projectNotesFor(state.projectId).length'), 2);
+  assert.match(w.run('projectNotesFor(state.projectId)[1].text'), /方案已提交/);
 });
 
 test('project task lists merge live records and reflect completion across calendar dates', () => {
@@ -445,7 +556,7 @@ test('editing a timed task to completed stops timing and reopening clears the co
   w.run("state.editTaskId = 't1'");
   const task = w.run("taskLocation('t1').task");
   for (const [key, value] of Object.entries({
-    title: task.title, project: task.project, date: w.run('DB.meta.today'), due: task.due,
+    title: task.title, project: task.project, date: w.run('DB.meta.today'), due: w.run("taskDeadlineDate(taskLocation('t1').task) || ''"),
     hours: '1', priority: 'P1', assignee: 'QA', note: '', status: 'done'
   })) w.fields['task-' + key] = { value: String(value || ''), checkValidity: () => true };
   await w.run("toggleTimer('t1')");
@@ -619,6 +730,8 @@ async function seedDocumentWorkflow(w: ReturnType<typeof workbench>) {
 
 test('document task merge keeps original completion and progress and completes every linked part together', async () => {
   const w = workbench(); await seedDocumentWorkflow(w);
+  w.run(`appendTaskNote(taskLocation(window.ids[0]).task,'门窗检查通过');
+    appendTaskNote(taskLocation(window.ids[1]).task,'灯具等待配件');`);
   const before = w.run("projectById('p1').progress");
   w.run(`{
     const doc=documentById('workflow');
@@ -630,6 +743,8 @@ test('document task merge keeps original completion and progress and completes e
   assert.equal(w.run("projectById('p1').progress"), before);
   assert.equal(w.run("taskLocation(window.ids[0]).task.workItems[0].done"), true);
   assert.equal(w.run("taskLocation(window.ids[0]).task.workItems[1].done"), false);
+  assert.match(w.run("JSON.stringify(taskNotesFor(taskLocation(window.ids[0]).task))"), /门窗检查通过/);
+  assert.match(w.run("JSON.stringify(taskNotesFor(taskLocation(window.ids[0]).task))"), /灯具等待配件/);
   assert.match(w.run("taskLocation(window.ids[0]).task.details"), /核对门锁[\s\S]*核对线路/);
   assert.equal(w.run("DB.waiting[0].taskId===window.ids[0] && DB.timeEntries[0].taskId===window.ids[0]"), true);
   assert.equal(w.run('DB.projectDetails.p1.milestones[0].taskIds.length'), 1);
