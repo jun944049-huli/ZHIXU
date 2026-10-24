@@ -1,6 +1,6 @@
 {
   "name": "xiaoyu-workbench",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": true,
   "description": "知序 · 个人工作台",
   "main": "./out/main/index.js",

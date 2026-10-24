@@ -18,7 +18,7 @@ interface Dependencies {
   encrypt(value: string): string;
   decrypt(value: string): string;
   credential(): Promise<string>;
-  engine(token: string): UpdateEngine;
+  engine(token: string): UpdateEngine | Promise<UpdateEngine>;
   prepare(): Promise<void>;
   notify(status: UpdateStatus): void;
 }
@@ -39,6 +39,10 @@ export function githubCredential(): Promise<string> {
 
 export function updateError(error: unknown): string {
   const text = String(error);
+  if (/ETIMEDOUT|timed out|connection stalled/i.test(text)) {
+    return '更新连接超时，已停止等待。请检查网络或代理后重新检查更新，当前版本可以继续使用。';
+  }
+  if (/更新代理配置无效/i.test(text)) return '更新代理配置无效，请检查系统代理或 HTTPS_PROXY 设置后重试。';
   if (/CHANNEL_FILE_NOT_FOUND|latest\.yml|ASSET_NOT_FOUND/i.test(text)) {
     return '此版本缺少更新文件，请等待完整发布后重试，或从 GitHub 下载完整安装包覆盖安装。';
   }
@@ -146,7 +150,7 @@ export class Updates {
         return this.status();
       }
       this.engine?.removeAllListeners();
-      const engine = this.deps.engine(token);
+      const engine = await this.deps.engine(token);
       this.engine = engine;
       engine.on('error', error => this.set({ stage: this.state.stage === 'installing' ? 'ready' : 'error', message: updateError(error) }));
       engine.on('update-available', info => {

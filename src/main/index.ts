@@ -20,6 +20,7 @@ import { RemoteAccess } from './remote-access';
 import updater from 'electron-updater';
 import { dirname } from 'node:path';
 import { Updates, UpdatePreparationError, githubCredential, UPDATE_REPOSITORY } from './updates';
+import { configureUpdateTransport } from './update-http';
 
 let store: WorkbenchStore;
 let window: BrowserWindow | null = null;
@@ -252,8 +253,10 @@ else {
       },
       decrypt: value => safeStorage.decryptString(Buffer.from(value, 'base64')),
       credential: githubCredential,
-      engine(token) {
-        const engine = new updater.NsisUpdater({ ...UPDATE_REPOSITORY, token });
+      async engine(token) {
+        const engine = new updater.NsisUpdater();
+        await configureUpdateTransport(engine);
+        engine.setFeedURL({ ...UPDATE_REPOSITORY, token });
         engine.logger = null;
         engine.autoDownload = false;
         engine.autoInstallOnAppQuit = false;

@@ -5,7 +5,8 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   main: {
     build: { rollupOptions: {
-      input: { index: resolve('src/main/index.ts'), 'document-worker': resolve('src/main/document-worker.ts') },
+      input: { index: resolve('src/main/index.ts'), 'document-worker': resolve('src/main/document-worker.ts'),
+        'update-http': resolve('src/main/update-http.ts') },
       external: ['node:sqlite']
     } }
   },

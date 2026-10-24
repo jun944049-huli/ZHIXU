@@ -142,4 +142,13 @@ test('missing metadata, network, disk and permission failures are actionable', (
   assert.match(updateError('ERR_CONNECTION_RESET'), /网络/);
   assert.match(updateError('ENOSPC'), /空间不足/);
   assert.match(updateError('EPERM'), /权限/);
+  assert.match(updateError('ETIMEDOUT'), /超时/);
+});
+test('a timed out download can be retried without permitting an incomplete installation', async () => {
+  const f = fixture(); f.engine.downloadError = 'ETIMEDOUT';
+  assert.match((await f.updates.handle({ operation: 'check' })).message, /超时/);
+  await assert.rejects(f.updates.handle({ operation: 'install' }));
+  f.engine.downloadError = '';
+  assert.equal((await f.updates.handle({ operation: 'check' })).stage, 'ready');
+  assert.equal(f.engine.downloads, 2);
 });
