@@ -11,6 +11,7 @@ mkdirSync(evidence, { recursive: true });
 const profile = mkdtempSync(join(evidence, 'chat-profile-'));
 const key = 'sk-isolated-chat-provider';
 const requests = [];
+const summaries = [];
 let denied = false;
 let heldReply;
 const server = createServer((request, response) => {
@@ -32,6 +33,11 @@ const server = createServer((request, response) => {
     const body = JSON.parse(raw);
     let text = 'OK';
     let hold = false;
+    if (body.input[0].content.includes('你负责整理工作对话的交接摘要')) {
+      summaries.push(body);
+      assert.equal(raw.includes(key), false);
+      text = JSON.stringify({ summary: '隔离验收项目：维修已完成，部署待继续；验收方案尚待确认。' });
+    }
     if (body.input[0].content.includes('你是用户的个人工作助手')) {
       requests.push(body);
       assert.equal(raw.includes(key), false);
@@ -240,6 +246,28 @@ try {
   await send('下一次提问使用切换后的模型。');
   assert.equal(requests.at(-1).model, 'semantic-model-a');
   assert.equal(await page.locator('.chat-message-model').last().innerText(), 'semantic-model-a');
+  const summaryBefore = summaries.length;
+  const historyBefore = await page.evaluate(() => {
+    const count = state.chatMessages.length;
+    state.chatMessages.push(...Array.from({ length: 72 }, (_, index) => ({
+      role: index % 2 ? 'assistant' : 'user', model: 'semantic-model-a', time: '过去',
+      text: `长对话事实-${index}：` + '部署需要保留上下文。'.repeat(45)
+    })));
+    saveChatHistory();
+    return count;
+  });
+  await send('根据之前的交接内容继续回答。');
+  assert.ok(summaries.length > summaryBefore);
+  assert.ok(requests.at(-1).input.length <= 25);
+  assert.match(requests.at(-1).input[0].content, /验收方案尚待确认/);
+  const compacted = summaries.length;
+  const covered = await page.evaluate(() => state.chatMemory.covered);
+  assert.ok(covered > 0);
+  assert.equal(await page.evaluate(() => state.chatMessages.length), historyBefore + 74);
+  await page.locator('[data-action="chat-details"]').first().click();
+  await page.locator('.chat-rail details summary').click();
+  assert.match(await page.locator('.chat-rail').innerText(), /对话记忆.*原记录保留/s);
+  await page.screenshot({ path: join(evidence, 'chat-memory-desktop.png') });
   await page.evaluate(() => persistWorkbench());
   await application.close();
   await launch();
@@ -247,18 +275,27 @@ try {
   await page.locator('.nav [data-view="chat"]').click();
   assert.match(await page.locator('.chat-active-model').innerText(), /semantic-model-a/);
   assert.equal(await page.locator('.chat-message-model').last().innerText(), 'semantic-model-a');
+  assert.equal(await page.locator('.chat-msg').count(), 60);
+  await page.locator('[data-action="chat-earlier"]').click();
   assert.ok((await page.locator('.chat-message-model').allTextContents()).includes('semantic-model-b'));
   assert.equal(await page.evaluate(() => allWorkbenchTasks().filter(t => t.title === '语义验收任务').length), 1);
   assert.equal(await page.evaluate(() => DB.projects.filter(p => p.name === '远山新计划').length), 1);
   assert.equal(await page.evaluate(() => projectById('sync-project').progress), 100);
   assert.equal(await page.evaluate(() => taskLocation('repair-a').task.done), true);
   assert.equal(await page.evaluate(() => projectNotesFor('sync-project').filter(note => note.source === '对话状态同步').length), 3);
+  assert.equal(await page.evaluate(() => state.chatMessages.length), historyBefore + 74);
+  assert.equal(await page.evaluate(() => state.chatMemory.covered), covered);
+  await send('重启后沿用刚才的上下文。');
+  assert.equal(summaries.length, compacted);
+  assert.match(requests.at(-1).input[0].content, /维修已完成，部署待继续/);
   assert.deepEqual(errors, []);
   const result = { passed: true, realIPCAndHTTP: true, homepageSynced: true,
     qaAndHistory: true, semanticTaskProgressAndProject: true, creationConfirmationRequired: true,
     workStatusAutoSync: true, linkedMilestonesAndProgress: true, overdueAndReportSync: true,
     failureRetry: true, modelSwitch: true, messageModelLabels: true, inFlightModelSwitch: true,
-    safetyPanelRemoved: true, composerFixedAtBottom: true, persistedAcrossRestart: true, requests: requests.length, profile };
+    safetyPanelRemoved: true, composerFixedAtBottom: true, persistedAcrossRestart: true,
+    durableConversationMemory: true, fullHistoryPreserved: true, summaryReuseAfterRestart: true,
+    summaries: summaries.length, requests: requests.length, profile };
   writeFileSync(join(evidence, 'chat-audit.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
 } catch (error) {

@@ -7,6 +7,7 @@ const api: DesktopAPI = {
   polish: payload => ipcRenderer.invoke('workbench:polish', payload),
   captureTask: payload => ipcRenderer.invoke('workbench:capture-task', payload),
   chat: payload => ipcRenderer.invoke('workbench:chat', payload),
+  summarizeChat: payload => ipcRenderer.invoke('workbench:chat-summary', payload),
   providerModels: payload => ipcRenderer.invoke('workbench:provider-models', payload),
   providerDiagnose: payload => ipcRenderer.invoke('workbench:provider-diagnose', payload),
   integration: payload => ipcRenderer.invoke('workbench:integration', payload),

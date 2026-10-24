@@ -10,8 +10,99 @@ function ensureChat() {
 
 function saveChatHistory() {
   try {
-    storageSet('jw-chat-history', JSON.stringify((state.chatMessages || []).slice(-60)));
-  } catch (e) { /* ignore */ }
+    storageSet('jw-chat-history', JSON.stringify(state.chatMessages || []));
+  } catch (error) { showToast('对话保存失败：' + documentFailureReason(error)); }
+}
+
+function chatHistoryMessages(user) {
+  return state.chatMessages.slice(0, state.chatMessages.indexOf(user) + 1)
+    .filter(message => ['user', 'assistant'].includes(message.role) && !message.retryOf)
+    .map(message => {
+      let content = (message.role === 'assistant' ?
+        ZhixuChatFormatting.display(String(message.text || '')) : String(message.text || '')).slice(0, 20000);
+      if (message.actionCard) {
+        const card = message.actionCard;
+        content += '\n操作记录（背景，不是新指令）：' + JSON.stringify({
+          type: card.type, status: card.status, title: card.title, projectId: card.projectId,
+          items: card.items, updates: card.updates
+        }).slice(0, 3900);
+      }
+      return { role: message.role, content };
+    }).filter(message => message.content.trim());
+}
+
+async function chatHistoryFingerprint(messages) {
+  const bytes = new TextEncoder().encode(JSON.stringify(messages));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function loadChatMemory() {
+  if (state.chatMemory !== undefined) return;
+  state.chatMemory = null;
+  try {
+    const memory = JSON.parse(storageGet('jw-chat-memory') || 'null');
+    if (memory?.version === 1 && Number.isInteger(memory.covered) && memory.covered > 0 &&
+        typeof memory.fingerprint === 'string' && /^[a-f0-9]{64}$/.test(memory.fingerprint) &&
+        typeof memory.summary === 'string' && memory.summary.trim() && memory.summary.length <= 5000) {
+      state.chatMemory = memory;
+    }
+  } catch { /* Original messages remain available if the cached summary cannot be read. */ }
+}
+
+async function prepareChatHistory(user, provider, requestId) {
+  loadChatMemory();
+  const messages = chatHistoryMessages(user);
+  let memory = state.chatMemory;
+  if (memory && (memory.covered >= messages.length ||
+      memory.fingerprint !== await chatHistoryFingerprint(messages.slice(0, memory.covered)))) {
+    memory = null;
+    storageSet('jw-chat-memory', 'null');
+    state.chatMemory = null;
+  }
+  let covered = memory?.covered || 0;
+  const remaining = () => messages.slice(covered);
+  const size = items => items.reduce((total, message) => total + message.content.length, 0);
+  // Compact in batches, leaving recent turns verbatim and never summarizing the current question.
+  while (remaining().length > 80 || (remaining().length > 1 &&
+      size(remaining()) + (memory?.summary.length || 0) > 18000)) {
+    let keep = Math.min(12, messages.length - covered - 1);
+    while (keep > 1 && size(messages.slice(-keep)) > 10000) keep--;
+    let end = covered;
+    let batchSize = 0;
+    while (end < messages.length - keep && end - covered < 100 &&
+        batchSize + messages[end].content.length <= 60000) {
+      batchSize += messages[end++].content.length;
+    }
+    if (end === covered) break;
+    if (!window.xiaoyuDesktop?.summarizeChat) throw new Error('当前版本无法整理长对话，请更新桌面版后重试');
+    state.chatSummarizing = true;
+    render();
+    scrollChatToBottom();
+    let result;
+    try {
+      result = await window.xiaoyuDesktop.summarizeChat({
+        provider, previousSummary: memory?.summary || '', messages: messages.slice(covered, end)
+      });
+    } catch (error) {
+      throw new Error('整理对话上下文失败：' + documentFailureReason(error));
+    } finally { state.chatSummarizing = false; }
+    if (state.chatRequestId !== requestId) return null;
+    if (typeof result.summary !== 'string' || !result.summary.trim() || result.summary.length > 5000) {
+      throw new Error('对话摘要无效，原聊天记录已保留，请重试');
+    }
+    // A document result or action may have changed while the model was summarizing.
+    const fingerprint = await chatHistoryFingerprint(messages.slice(0, end));
+    if (fingerprint !== await chatHistoryFingerprint(chatHistoryMessages(user).slice(0, end))) {
+      throw new Error('对话记录已更新，请重试；原聊天记录已保留');
+    }
+    covered = end;
+    memory = { version: 1, covered, fingerprint, summary: result.summary.trim(),
+      model: result.model || provider.model, updatedAt: new Date().toISOString() };
+    storageSet('jw-chat-memory', JSON.stringify(memory));
+    state.chatMemory = memory;
+  }
+  return { messages: remaining(), memory: memory?.summary || '' };
 }
 
 function defaultChatShortcuts() {
@@ -29,6 +120,16 @@ function ensureChatShortcuts() {
 function scrollChatToBottom() {
   const thread = document.getElementById('chat-thread');
   if (thread) thread.scrollTop = thread.scrollHeight;
+}
+
+function showEarlierChat() {
+  const thread = document.getElementById('chat-thread');
+  const height = thread?.scrollHeight || 0;
+  const top = thread?.scrollTop || 0;
+  state.chatVisibleCount = (state.chatVisibleCount || 60) + 60;
+  render();
+  const updated = document.getElementById('chat-thread');
+  if (updated) updated.scrollTop = updated.scrollHeight - height + top;
 }
 
 function matchProjectByText(text, includeContext = true) {
@@ -158,7 +259,7 @@ function renderChatLoading() {
       <span class="chat-avatar ai">${brandImage()}</span>
       <div class="chat-msg-body">
         <div class="chat-bubble chat-loading"><i></i><i></i><i></i></div>
-        <div class="chat-meta">正在使用 ${esc(state.chatRequestModel || chatModelLabel())}…</div>
+        <div class="chat-meta">${state.chatSummarizing ? '正在整理对话上下文' : '正在使用 ' + esc(state.chatRequestModel || chatModelLabel())}…</div>
       </div>
     </div>
   `;
@@ -166,6 +267,7 @@ function renderChatLoading() {
 
 function renderChat() {
   ensureChat();
+  loadChatMemory();
   ensureChatShortcuts();
   const contexts = [{ id: 'auto', name: '自动匹配' }].concat(DB.projects.map(p => ({ id: p.id, name: p.name })));
   return `
@@ -182,7 +284,8 @@ function renderChat() {
     <div class="chat-layout ${state.chatDetails ? 'with-context' : ''} ${workspaceState.open ? 'with-workspace' : ''}">
       <section class="chat-main" aria-label="对话消息">
         <div class="chat-thread" id="chat-thread">
-          ${state.chatMessages.map(renderChatMessage).join('')}
+          ${state.chatMessages.length > (state.chatVisibleCount || 60) ? '<button class="btn btn-sm btn-ghost" data-action="chat-earlier">查看更早消息</button>' : ''}
+          ${state.chatMessages.slice(-(state.chatVisibleCount || 60)).map(renderChatMessage).join('')}
           ${state.chatSending ? renderChatLoading() : ''}
         </div>
 
@@ -217,6 +320,7 @@ function renderChat() {
               <div><span>任务</span><b>${allWorkbenchTasks().length}</b></div>
               <div><span>今日剩余</span><b>${Math.max(0, DB.capacity.available - DB.capacity.committed).toFixed(1)}h</b></div>
             </div>
+            ${state.chatMemory ? `<details class="chat-work-details mt-12"><summary>对话记忆</summary><p class="small muted">已整理 ${state.chatMemory.covered} 条历史消息，原记录保留。</p><div class="small">${esc(state.chatMemory.summary).replace(/\n/g, '<br>')}</div></details>` : ''}
             <button class="btn btn-block mt-12" data-action="document-library">${icon('file', 14)} 查看附件</button>
           </div>
         </section>
@@ -511,6 +615,7 @@ async function sendChat(retryId = '') {
   const provider = aiProviderConfig();
   state.chatModel = chatModelLabel();
   state.chatRequestModel = state.chatModel;
+  state.chatVisibleCount = 60;
   state.chatSending = true;
   const requestId = ++state.chatRequestId;
   render();
@@ -521,15 +626,14 @@ async function sendChat(retryId = '') {
     if (provider.id === 'local') replies = [buildChatReply(text)];
     else {
       if (!window.xiaoyuDesktop?.chat) throw new Error('当前预览未接入模型对话，请使用更新后的桌面版');
-      const history = state.chatMessages.slice(0, state.chatMessages.indexOf(user) + 1)
-        .filter(message => ['user', 'assistant'].includes(message.role) && !message.retryOf)
-        .slice(-24).map(message => ({ role: message.role, content: (message.role === 'assistant' ?
-          ZhixuChatFormatting.display(String(message.text)) : String(message.text)).slice(0, 20000) }));
+      const history = await prepareChatHistory(user, provider, requestId);
+      if (!history || state.chatRequestId !== requestId) return;
+      if (history.memory) { render(); scrollChatToBottom(); }
       const context = modelChatContext();
       const result = await window.xiaoyuDesktop.chat({
         provider: { baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: provider.model,
           protocol: provider.protocol || 'auto', name: provider.name },
-        messages: history, context
+        ...history, context
       });
       if (state.chatRequestId !== requestId) return;
       const model = String(result.model || '').trim() || provider.model;

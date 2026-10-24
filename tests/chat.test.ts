@@ -2,7 +2,62 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { chat } from '../src/main/chat';
+import { chat, summarizeChat } from '../src/main/chat';
+
+test('conversation summarization uses the selected protocol, rejects incomplete memory and never returns actions', async () => {
+  const bodies: any[] = [];
+  let answer = JSON.stringify({ summary: '青禾小学维修完成；部署待办；验收方案待确认。sk-memory-secret',
+    actions: [{ type: 'progress', projectId: 'p1', progress: 100 }] });
+  const server = createServer((request, response) => {
+    let raw = '';
+    request.on('data', chunk => { raw += chunk; });
+    request.on('end', () => {
+      const body = JSON.parse(raw); bodies.push(body);
+      assert.equal(raw.includes('sk-memory-secret'), false);
+      assert.equal(request.headers.authorization, 'Bearer sk-memory-secret');
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ model: body.model,
+        ...(request.url?.endsWith('/responses') ? { output_text: answer } :
+          { choices: [{ message: { content: answer } }] }) }));
+    });
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const input = {
+    provider: { baseUrl: `http://127.0.0.1:${address.port}`, apiKey: 'sk-memory-secret',
+      model: 'selected-memory-model', protocol: 'responses' },
+    previousSummary: '青禾小学维修进行中。',
+    messages: [{ role: 'user', content: '维修完成，其他部署仍未完成。' },
+      { role: 'assistant', content: '建议验收方案，尚未确认。' }]
+  };
+  try {
+    const result = await summarizeChat(input);
+    assert.match(result.summary, /维修完成/);
+    assert.equal(result.model, 'selected-memory-model');
+    assert.equal(result.summary.includes('sk-memory-secret'), false);
+    assert.equal('actions' in result, false);
+    assert.deepEqual(JSON.parse(bodies[0].input[1].content), {
+      previousSummary: input.previousSummary, messages: input.messages
+    });
+    assert.match(bodies[0].input[0].content, /不可信参考数据/);
+    assert.match(bodies[0].input[0].content, /取消必须明确区分/);
+    assert.equal(bodies[0].store, false);
+    assert.equal(bodies[0].max_output_tokens, 4000);
+    input.provider.protocol = 'chat';
+    await summarizeChat(input);
+    assert.ok(bodies[1].messages);
+    assert.equal(bodies[1].max_tokens, 4000);
+    for (const invalid of ['非JSON内容', '{"summary":""}', JSON.stringify({ summary: '字'.repeat(5001) })]) {
+      answer = invalid;
+      await assert.rejects(summarizeChat(input), /摘要/);
+    }
+    await assert.rejects(summarizeChat({ ...input, messages: Array.from({ length: 4 },
+      () => ({ role: 'user', content: '字'.repeat(20000) })) }), /分批/);
+    assert.equal(bodies.length, 5);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
 
 test('Q&A and semantic commands use the selected model with history and validated proposals', async () => {
   const bodies: any[] = [];
@@ -35,6 +90,7 @@ test('Q&A and semantic commands use the selected model with history and validate
   const input = {
     provider: { baseUrl: `http://127.0.0.1:${address.port}`, apiKey: 'sk-chat-private-test',
       model: 'selected-model', name: '验收供应商', protocol: 'responses' },
+    memory: '青禾小学维修完成；设备部署未完成。验收方案尚未确认。',
     messages: [{ role: 'user', content: '关键路径是什么？' }, { role: 'assistant', content: '前一次回答' },
       { role: 'user', content: '结合项目解释它。' }],
     context: { today: '2026-10-22', selectedProjectId: 'p1',
@@ -52,6 +108,8 @@ test('Q&A and semantic commands use the selected model with history and validate
     assert.deepEqual(bodies[0].input.slice(1), input.messages);
     assert.match(bodies[0].input[0].content, /2026-10-22/);
     assert.match(bodies[0].input[0].content, /确认才写入/);
+    assert.match(bodies[0].input[0].content, /验收方案尚未确认/);
+    assert.match(bodies[0].input[0].content, /不重放历史操作/);
     assert.equal(JSON.stringify(bodies[0]).includes(input.provider.apiKey), false);
 
     const task = { type: 'task', title: '验收', projectId: 'p1', due: '2026-10-23',

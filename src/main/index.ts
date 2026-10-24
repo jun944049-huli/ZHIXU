@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { WorkbenchStore } from './database';
 import { polish } from './polish';
-import { chat } from './chat';
+import { chat, summarizeChat } from './chat';
 import { captureTask } from './capture';
 import { providerDiagnose, providerModels } from './providers';
 import { runIntegration } from './integrations';
@@ -94,6 +94,10 @@ else {
     ipcMain.handle('workbench:chat', (event, payload: unknown) => {
       checkSender(event);
       return chat(payload);
+    });
+    ipcMain.handle('workbench:chat-summary', (event, payload: unknown) => {
+      checkSender(event);
+      return summarizeChat(payload);
     });
     ipcMain.handle('workbench:capture-task', (event, payload: unknown) => {
       checkSender(event);

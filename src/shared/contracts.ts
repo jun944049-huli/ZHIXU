@@ -53,6 +53,7 @@ export interface DesktopAPI {
   polish(payload: unknown): Promise<{ text: string; model: string; provider: string }>;
   captureTask(payload: unknown): Promise<{ title: string; model: string }>;
   chat(payload: unknown): Promise<ChatResult>;
+  summarizeChat(payload: unknown): Promise<{ summary: string; model: string }>;
   providerModels(payload: unknown): Promise<{ models: string[]; endpoint: string }>;
   providerDiagnose(payload: unknown): Promise<ProviderDiagnosis>;
   integration(payload: unknown): Promise<IntegrationResult>;
@@ -193,9 +194,19 @@ export const chatActionSchema = z.discriminatedUnion('type', [
     goal: z.string().max(2000).default(''), owner: z.string().max(100).default('') })
 ]);
 export type ChatAction = z.infer<typeof chatActionSchema>;
+const chatMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']), content: z.string().min(1).max(24000)
+});
+export const chatSummarySchema = z.object({
+  provider: providerSchema,
+  previousSummary: z.string().max(5000).default(''),
+  messages: z.array(chatMessageSchema).min(1).max(100)
+}).refine(input => input.messages.reduce((size, message) => size + message.content.length, 0) <= 60000,
+  '本次整理的历史过长，请分批处理');
 export const chatRequestSchema = z.object({
   provider: providerSchema.extend({ name: z.string().max(60).default('自定义供应商') }),
-  messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().min(1).max(20000) })).min(1).max(24),
+  messages: z.array(chatMessageSchema).min(1).max(80),
+  memory: z.string().max(5000).default(''),
   context: z.object({
     today: z.iso.date(),
     selectedProjectId: projectReference,

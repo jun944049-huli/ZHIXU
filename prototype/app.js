@@ -325,6 +325,9 @@ function handleClick(e) {
     case 'chat-send':
       sendChat();
       break;
+    case 'chat-earlier':
+      showEarlierChat();
+      break;
     case 'chat-retry':
       sendChat(el.dataset.id);
       break;

@@ -10,10 +10,10 @@ function workbench() {
   const saved: unknown[] = [];
   const preferences: Record<string, string> = {};
   const context = createContext({
-    crypto: webcrypto, console, setTimeout, clearTimeout, Blob,
+    crypto: webcrypto, console, setTimeout, clearTimeout, Blob, TextEncoder,
     workbenchSnapshot: () => ({ db: {}, preferences: {} }),
     window: {},
-    storageGet: () => null,
+    storageGet: (key: string) => preferences[key] || null,
     storageSet: (key: string, value: string) => { preferences[key] = value; },
     document: { getElementById: (id: string) => fields[id] || null, querySelector: () => null,
       addEventListener: () => {} },
@@ -377,6 +377,103 @@ test('model chat is a real bridge call, retains failed questions and retries wit
   assert.equal(w.run('DB.inbox.length'), before);
 });
 
+function seedLongChat(w: ReturnType<typeof workbench>) {
+  w.fields['chat-input'] = { value: '继续说明部署的下一步', checkValidity: () => true };
+  w.run(`DB.settings.aiProvider='custom'; DB.settings.customProvider={
+    name:'验收模型',baseUrl:'http://127.0.0.1',apiKey:'secret',model:'memory-model',protocol:'responses'};
+    state.chatMessages=Array.from({length:72},(_,i)=>({id:'history-'+i,
+      role:i%2?'assistant':'user',text:(i===0?'青禾小学的维修完成，部署尚未完成。':'历史事实'+i+'。')+'背景。'.repeat(120)}));
+    window.summaryCalls=[]; window.chatCalls=[];
+    window.xiaoyuDesktop={
+      summarizeChat:async payload=>{window.summaryCalls.push(payload); return {
+        summary:'青禾小学：维修已完成；部署未完成，继续跟进。验收方案仅为提议，尚未确认。',
+        model:'memory-model'};},
+      chat:async payload=>{window.chatCalls.push(payload);
+        return {reply:'继续部署。',actions:[],warnings:[],model:payload.provider.model};}
+    };`);
+}
+
+test('long conversations use rolling cached memory and retain full history across reload and model changes', async () => {
+  const w = workbench(); seedLongChat(w);
+  const before = w.run('allWorkbenchTasks().length');
+  await w.run('sendChat()');
+  const history = JSON.parse(w.preferences['jw-chat-history']);
+  assert.equal(history.length, 74);
+  assert.match(history[0].text, /维修完成/);
+  assert.equal(w.run('window.summaryCalls.length'), 1);
+  assert.equal(w.run('window.summaryCalls[0].messages.length'), 61);
+  assert.equal(w.run('window.chatCalls[0].messages.length'), 12);
+  assert.match(w.run('window.chatCalls[0].memory'), /尚未确认/);
+  assert.equal(w.run('allWorkbenchTasks().length'), before);
+  assert.ok(w.run('window.chatCalls[0].messages.reduce((n,m)=>n+m.content.length,0)+window.chatCalls[0].memory.length') <
+    w.run('state.chatMessages.reduce((n,m)=>n+m.text.length,0)') / 4);
+  // Reuse durable memory after reloading, even when the provider model changes.
+  w.run(`state.chatMemory=undefined; state.chatMessages=JSON.parse(storageGet('jw-chat-history'));
+    DB.settings.customProvider.model='another-model';`);
+  w.fields['chat-input'].value = '按照刚才的决定继续';
+  await w.run('sendChat()');
+  assert.equal(w.run('window.summaryCalls.length'), 1);
+  assert.equal(w.run('window.chatCalls.at(-1).provider.model'), 'another-model');
+  assert.match(w.run('window.chatCalls.at(-1).memory'), /青禾小学/);
+  // Roll forward instead of sending the same prefix again.
+  w.run(`state.chatMessages.push(...Array.from({length:20},(_,i)=>({
+    role:i%2?'assistant':'user',text:'新进展'+i+'。'.repeat(800)})))`);
+  await w.run('sendChat()');
+  assert.equal(w.run('window.summaryCalls.length'), 2);
+  assert.match(w.run('window.summaryCalls[1].previousSummary'), /维修已完成/);
+  assert.equal(w.run('window.summaryCalls[1].messages.some(m=>m.content.includes("历史事实1。"))'), false);
+});
+
+test('summary failures preserve original history and retry safely without executing work updates', async () => {
+  const w = workbench(); seedLongChat(w);
+  const before = w.run('JSON.stringify(DB)');
+  w.run("window.xiaoyuDesktop.summarizeChat=async()=>{throw new Error('HTTP 429: 请求受限')}");
+  await w.run('sendChat()');
+  assert.match(w.run('state.chatMessages.at(-1).text'), /整理对话上下文失败.*429/);
+  assert.equal(w.run('state.chatMessages.length'), 74);
+  assert.equal(w.run('window.chatCalls.length'), 0);
+  assert.equal(w.run('JSON.stringify(DB)'), before);
+  assert.equal(w.run('state.chatSummarizing'), false);
+  const retryId = w.run('state.chatMessages.at(-1).retryOf');
+  w.run(`window.xiaoyuDesktop.summarizeChat=async()=>({summary:'维修已完成；部署未完成。',model:'memory-model'});
+    window.xiaoyuDesktop.chat=async()=>{throw new Error('HTTP 502: 上游异常')};`);
+  await w.run(`sendChat(${JSON.stringify(retryId)})`);
+  assert.match(w.run('state.chatMessages.at(-1).text'), /502/);
+  assert.ok(JSON.parse(w.preferences['jw-chat-memory']).covered > 0);
+  w.run(`window.xiaoyuDesktop.summarizeChat=async()=>{throw new Error('不应再次摘要')};
+    window.xiaoyuDesktop.chat=async payload=>({reply:'已恢复',actions:[],warnings:[],model:payload.provider.model});`);
+  await w.run(`sendChat(${JSON.stringify(retryId)})`);
+  assert.equal(w.run('state.chatMessages.at(-1).text'), '已恢复');
+  assert.equal(w.run('state.chatMessages.filter(m=>m.id===' + JSON.stringify(retryId) + ').length'), 1);
+  assert.equal(w.run('state.chatMessages.some(m=>m.retryOf)'), false);
+});
+
+test('changed historical decisions invalidate cached memory and pending actions stay explicitly pending', async () => {
+  const w = workbench(); seedLongChat(w);
+  w.run(`state.chatMessages[1].actionCard={type:'task',status:'pending',title:'待确认验收',
+    items:[{label:'任务',value:'验收部署'}]};`);
+  await w.run('sendChat()');
+  assert.match(w.run('window.summaryCalls[0].messages[1].content'), /"status":"pending"/);
+  w.run("state.chatMessages[1].actionCard.status='cancelled'");
+  await w.run('sendChat()');
+  assert.equal(w.run('window.summaryCalls.length'), 2);
+  assert.equal(w.run('window.summaryCalls[1].previousSummary'), '');
+  assert.match(w.run('window.summaryCalls[1].messages[1].content'), /"status":"cancelled"/);
+});
+
+test('large histories are summarized in bounded batches and never compact the current message', async () => {
+  const w = workbench(); seedLongChat(w);
+  w.run(`state.chatMessages=Array.from({length:20},(_,i)=>({
+    role:i%2?'assistant':'user',text:'第'+i+'条。'+'事实'.repeat(6000)}));`);
+  w.fields['chat-input'].value = '本次问题。' + '问题'.repeat(9990);
+  await w.run('sendChat()');
+  assert.ok(w.run('window.summaryCalls.length') >= 4);
+  assert.equal(w.run('window.summaryCalls.every(p=>p.messages.length<=100 && p.messages.reduce((n,m)=>n+m.content.length,0)<=60000)'), true);
+  assert.equal(w.run('window.summaryCalls.some(p=>p.messages.some(m=>m.content.startsWith("本次问题")))'), false);
+  assert.equal(w.run('window.chatCalls[0].messages.at(-1).content'), w.fields['chat-input'].value);
+  assert.equal(w.run('state.chatMessages.length'), 22);
+});
+
 test('message model identity survives switching during a request and confirming older proposals', async () => {
   const w = workbench();
   w.fields['chat-input'] = { value: '请求模型甲', checkValidity: () => true };
@@ -384,6 +481,7 @@ test('message model identity survives switching during a request and confirming 
     name:'供应商',baseUrl:'http://127.0.0.1',apiKey:'isolated',model:'model-a'};
     window.xiaoyuDesktop={chat:()=>new Promise(resolve=>{window.finishReply=resolve})};`);
   const pending = w.run('sendChat()');
+  await new Promise(resolve => setImmediate(resolve));
   w.run(`DB.settings.customProvider.model='model-b'; state.chatModel=chatModelLabel();
     window.finishReply({reply:'甲的回复',model:'model-a',warnings:[],actions:[
       {type:'progress',projectId:'p1',progress:50}]});`);
