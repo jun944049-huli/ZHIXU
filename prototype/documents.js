@@ -256,8 +256,33 @@ function openDocumentLibrary(errors = []) {
     <div class="feature-list">${DB.documents.slice().reverse().map(doc => `<div class="feature-list-row">
       <div class="document-list-label"><b>${esc(doc.title)}</b><p class="small muted">${esc(projectById(doc.projectId)?.name || '待确认项目')}
       · ${esc(doc.parseError ? '原文件已保存 · 解析待重试' : doc.analysis?.mode || '待分析')} · ${doc.analysis?.tasks?.length || 0} 条拆解</p></div>
-      <button class="btn btn-sm" data-action="document-open" data-id="${esc(doc.id)}">查看与修改</button></div>`).join('') || '暂无附件'}</div>`,
+      <div class="row gap-6 document-row-actions">
+        <button class="btn btn-sm" data-action="document-open" data-id="${esc(doc.id)}">查看与修改</button>
+        <button class="btn btn-sm btn-danger" data-action="document-remove" data-id="${esc(doc.id)}" title="删除附件记录" aria-label="删除附件记录 ${esc(doc.title)}">${icon('trash', 12)} 删除</button>
+      </div></div>`).join('') || '暂无附件'}</div>`,
     `<button class="btn btn-primary" data-action="chat-attachment">${icon('upload', 13)} 上传附件</button>`, 'document-library');
+}
+
+function requestDocumentRemove(id) {
+  const doc = documentById(id);
+  if (!doc) { showToast('附件记录已不存在'); return; }
+  state.documentRemoveId = id;
+  localModal('删除附件记录', `<p>确认删除「${esc(doc.title)}」的附件记录？</p>
+    <p class="small muted">已归档到项目的任务、项目和进展记录都会保留；原文件仍保存在本机，可继续从本机找回。</p>`,
+    '<button class="btn" data-action="close-modal">取消</button><button class="btn btn-danger" data-action="document-remove-confirm">确认删除</button>');
+}
+
+async function removeDocumentRecord() {
+  const id = state.documentRemoveId;
+  const index = DB.documents.findIndex(doc => doc.id === id);
+  state.documentRemoveId = null;
+  if (index < 0) return;
+  const [doc] = DB.documents.splice(index, 1);
+  DB.documentArchive ||= [];
+  DB.documentArchive.push({ ...doc, removedAt: new Date().toISOString() });
+  if (state.documentId === id) state.documentId = null;
+  await finishLocal('附件记录已删除，原文件仍保留');
+  openDocumentLibrary();
 }
 
 function openDocumentEditor(id, keepDraft = false) {

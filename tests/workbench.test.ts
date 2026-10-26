@@ -7,6 +7,7 @@ import { webcrypto } from 'node:crypto';
 
 function workbench() {
   const fields: Record<string, { value: string; checked?: boolean; checkValidity(): boolean }> = {};
+  const modalRoot = { innerHTML: '' };
   const saved: unknown[] = [];
   const preferences: Record<string, string> = {};
   const context = createContext({
@@ -15,9 +16,9 @@ function workbench() {
     window: {},
     storageGet: (key: string) => preferences[key] || null,
     storageSet: (key: string, value: string) => { preferences[key] = value; },
-    document: { getElementById: (id: string) => fields[id] || null, querySelector: () => null,
+    document: { getElementById: (id: string) => fields[id] || (id === 'modal-root' ? modalRoot : null), querySelector: () => null,
       addEventListener: () => {} },
-    render: () => {}, closeModal: () => {}, showToast: () => {},
+    render: () => {}, closeModal: () => { modalRoot.innerHTML = ''; }, showToast: () => {},
     scrollChatToBottom: () => {},
     persistWorkbench: async () => { saved.push(runInContext('JSON.stringify(DB)', context)); }
   });
@@ -28,7 +29,7 @@ function workbench() {
   runInContext('initializeIntegrations(); initializeFeatures();', context);
   return {
     run: (code: string) => runInContext(code, context),
-    fields, saved, preferences
+    fields, saved, preferences, modalRoot
   };
 }
 
@@ -213,6 +214,37 @@ test('saving overdue edits, rescheduling and completing one task update only its
   assert.equal(w.run("taskDeadlineDate(taskLocation('a').task)"), w.fields['task-date'].value);
   w.run("initializeFeatures()");
   assert.equal(w.run('overdueTasks().length'), 1);
+});
+
+test('waiting items and attachment records can be deleted and stay reachable in the local archive', async () => {
+  const w = workbench();
+  w.run(`DB.waiting=[{id:'w-a',title:'等待客户确认',person:'小陈',days:2,impact:'影响评审',status:'open'},
+    {id:'w-b',title:'等待盖章',person:'行政',days:1,impact:'影响提交',status:'open'}];
+    DB.documents=[{id:'doc-a',title:'附件A.docx',content:'A',analysis:{mode:'本地规则',tasks:[]}},
+      {id:'doc-b',title:'附件B.xlsx',content:'B',analysis:{mode:'本地规则',tasks:[]}}];
+    state.waitingRemoveId='w-a'; state.documentRemoveId='doc-a';`);
+  await w.run('removeWaitingRecord()');
+  assert.equal(w.run("DB.waiting.some(w=>w.id==='w-a')"), false);
+  assert.equal(w.run("DB.recordArchive.find(r=>r.record.id==='w-a').kind"), 'waiting');
+  assert.match(w.modalRoot.innerHTML, /等待盖章/);
+  assert.doesNotMatch(w.modalRoot.innerHTML, /等待客户确认/);
+  await w.run('removeDocumentRecord()');
+  assert.equal(w.run("DB.documents.some(d=>d.id==='doc-a')"), false);
+  assert.equal(w.run("DB.documentArchive[0].id"), 'doc-a');
+  assert.match(w.modalRoot.innerHTML, /附件B\.xlsx/);
+  assert.doesNotMatch(w.modalRoot.innerHTML, /附件A\.docx/);
+});
+
+test('rescheduling one overdue task keeps the overdue list open for the remaining items', async () => {
+  const w = workbench();
+  w.run(`DB.tasks={must:[],should:[],could:[]}; DB.taskCalendar={};
+    for (const id of ['o-a','o-b']) addConfirmedTask({id,title:'逾期 '+id,project:null,estimate:'1h',
+      priority:'P2',due:addDaysISO(DB.meta.today,-2),overdue:true},DB.meta.today,'should');`);
+  w.run("handleFeatureAction('overdue-plan',{dataset:{id:'o-a'}})");
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(w.run('overdueTasks().length'), 1);
+  assert.match(w.modalRoot.innerHTML, /逾期 o-b/);
+  assert.doesNotMatch(w.modalRoot.innerHTML, /逾期 o-a/);
 });
 
 test('relative deadlines stay anchored across day rollover and invalid task dates cannot move records', async () => {

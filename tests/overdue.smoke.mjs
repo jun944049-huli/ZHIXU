@@ -33,8 +33,9 @@ try {
   await page.locator('#task-title').fill('补充后的验收清单');
   await page.locator('#task-note').fill('已更新清单，仍保留原截止日期');
   await page.locator('[data-action="task-save"]').click();
+  await page.waitForFunction(() => (document.querySelector('#modal-root')?.innerText || '').includes('补充后的验收清单'));
+  assert.equal(await page.locator('#modal-root .modal').count(), 1, 'editing from the overdue list stays in the list');
   assert.match(await page.locator('.overdue-strip').innerText(), /补充后的验收清单/);
-  await page.locator('[data-action="overdue"]').click();
   await page.locator('#modal-root [data-action="task-edit"][data-id="qa-a"]').click();
   const future = await page.evaluate(() => addDaysISO(DB.meta.today, 3));
   await page.locator('#task-date').fill(future);
@@ -59,6 +60,59 @@ try {
   await page.reload(); await ready();
   assert.equal(await page.evaluate(() => overdueTasks().length), 1);
   assert.equal(await page.evaluate(() => allWorkbenchTasks().length), 2);
+
+  // arranging one overdue task keeps the list open for the remaining items
+  await page.evaluate(() => {
+    for (const [id, title] of [['keep-a', '保留 A'], ['keep-b', '保留 B']])
+      addConfirmedTask({ id, title, project: null, estimate: '1h', priority: 'P2',
+        due: addDaysISO(DB.meta.today, -1), overdue: true }, DB.meta.today, 'should');
+    render();
+  });
+  await page.locator('[data-action="overdue"]').click();
+  assert.equal(await page.locator('#modal-root [data-action="overdue-plan"]').count(), 3);
+  await page.locator('[data-action="overdue-plan"][data-id="keep-a"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('#modal-root [data-action="overdue-plan"]').length === 2);
+  assert.equal(await page.locator('#modal-root .modal').count(), 1);
+  assert.match(await page.locator('#modal-root').innerText(), /保留 B/);
+  assert.doesNotMatch(await page.locator('#modal-root').innerText(), /保留 A/);
+  await page.locator('#modal-root [data-action="close-modal"]').click();
+
+  // waiting items can be deleted from the open list and remain in the local archive
+  await page.evaluate(() => {
+    DB.waiting = [{ id: 'w-1', title: '等待设计确认', person: '小陈', days: 1, impact: '影响评审', status: 'open' },
+      { id: 'w-2', title: '等待盖章', person: '行政', days: 2, impact: '影响提交', status: 'open' }];
+    render();
+  });
+  await page.locator('[data-action="waiting"]').click();
+  assert.equal(await page.locator('#modal-root [data-action="waiting-remove"]').count(), 2);
+  await page.locator('[data-action="waiting-remove"][data-id="w-1"]').click();
+  await page.locator('[data-action="waiting-remove-confirm"]').click();
+  await page.waitForFunction(() => {
+    const text = document.querySelector('#modal-root')?.innerText || '';
+    return text.includes('等待盖章') && !text.includes('等待设计确认');
+  });
+  assert.equal(await page.evaluate(() => DB.waiting.length), 1);
+  assert.equal(await page.evaluate(() => DB.recordArchive.at(-1).record.id), 'w-1');
+  assert.equal(await page.locator('#modal-root .modal').count(), 1);
+  await page.locator('#modal-root [data-action="close-modal"]').click();
+
+  // attachment records can be deleted from the library and remain in the local archive
+  await page.evaluate(() => {
+    DB.documents.push({ id: 'doc-delete', title: '待删除附件.docx', content: '待删除', projectId: null,
+      analysis: { mode: '本地规则', tasks: [] } });
+    openDocumentLibrary();
+  });
+  await page.locator('[data-action="document-remove"][data-id="doc-delete"]').click();
+  await page.locator('[data-action="document-remove-confirm"]').click();
+  await page.waitForFunction(() => {
+    const text = document.querySelector('#modal-root')?.innerText || '';
+    return text.includes('附件记录与待确认项目') && !text.includes('待删除附件');
+  });
+  assert.equal(await page.evaluate(() => DB.documents.some(doc => doc.id === 'doc-delete')), false);
+  assert.equal(await page.evaluate(() => DB.documentArchive.at(-1).id), 'doc-delete');
+  assert.equal(await page.locator('#modal-root .modal').count(), 1);
+  await page.locator('#modal-root [data-action="close-modal"]').click();
+
   assert.deepEqual(errors, []);
   console.log('Overdue UI passed: edit, reschedule, restart, same-title isolation, completion isolation.');
 } finally { await application.close(); }

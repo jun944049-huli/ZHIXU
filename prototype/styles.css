@@ -2155,6 +2155,11 @@ h3 { font-size: 13px; font-weight: 650; }
 .document-editor .integration-notice { margin-bottom: 16px; }
 .document-library .feature-list-row { gap: 12px; }
 .document-library .feature-list-row .btn { flex-shrink: 0; }
+.document-library .document-row-actions { flex-shrink: 0; }
+@media (max-width: 560px) {
+  .document-library .feature-list-row { align-items: flex-start; }
+  .document-library .document-row-actions { width: 100%; justify-content: flex-end; }
+}
 @media (max-width: 600px) {
   .document-task-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .document-editor .modal-body { padding: 16px; }

@@ -191,7 +191,9 @@ async function saveTaskEditor() {
   addConfirmedTask(t, date, ['P0', 'P1'].includes(t.priority) ? 'must' : t.priority === 'P4' ? 'could' : 'should', false);
   if (changed || previousProject !== t.project || previousTitle !== t.title ||
       previousDeadline !== taskDeadlineDate(t) || date !== found.date) reconcileProjectWork([previousProject, t.project]);
+  const reopenOverdue = state.overdueReturn;
   await finishLocal('任务已保存');
+  if (reopenOverdue && overdueTasks().length) openOverdue();
 }
 
 function requestTaskDelete() {
@@ -473,8 +475,32 @@ async function removeEditorRecord() {
 
 function openWaiting() {
   localModal('等待事项', `<div class="feature-list">${DB.waiting.filter(w => w.status !== 'done').map(w => `<div class="feature-list-row"><div><b>${esc(w.title)}</b><p class="small muted">${esc(w.person)} · ${w.days} 天 · ${esc(w.impact)}</p></div>
-    <button class="icon-btn" aria-label="编辑等待事项" data-action="record-edit" data-kind="waiting" data-id="${esc(w.id)}">${icon('edit', 14)}</button></div>`).join('') || '暂无等待事项'}</div>`,
+    <div class="row gap-6">
+      <button class="icon-btn" aria-label="编辑等待事项" data-action="record-edit" data-kind="waiting" data-id="${esc(w.id)}">${icon('edit', 14)}</button>
+      <button class="btn btn-sm btn-danger" aria-label="删除等待事项 ${esc(w.title)}" data-action="waiting-remove" data-id="${esc(w.id)}">${icon('trash', 12)} 删除</button>
+    </div></div>`).join('') || '暂无等待事项'}</div>`,
     '<button class="btn btn-primary" data-action="record-edit" data-kind="waiting">新增等待事项</button>');
+}
+
+function requestWaitingRemove(id) {
+  const item = DB.waiting.find(w => w.id === id);
+  if (!item) { showToast('等待事项已不存在'); return; }
+  state.waitingRemoveId = id;
+  localModal('删除等待事项', `<p>确认删除「${esc(item.title)}」？</p>
+    <p class="small muted">删除后不再显示在等待跟进和本地简报中，记录会保留在本机归档。</p>`,
+    '<button class="btn" data-action="close-modal">取消</button><button class="btn btn-danger" data-action="waiting-remove-confirm">确认删除</button>');
+}
+
+async function removeWaitingRecord() {
+  const id = state.waitingRemoveId;
+  const index = DB.waiting.findIndex(w => w.id === id);
+  state.waitingRemoveId = null;
+  if (index < 0) return;
+  const [item] = DB.waiting.splice(index, 1);
+  DB.recordArchive ||= [];
+  DB.recordArchive.push({ kind: 'waiting', record: item, removedAt: new Date().toISOString() });
+  await finishLocal('等待事项已删除');
+  openWaiting();
 }
 
 function openOverdue() {
@@ -568,7 +594,10 @@ async function copyLocalText(text, title = '复制文本') {
 function handleFeatureAction(action, el) {
   const id = el.dataset.id || el.closest('[data-task]')?.dataset.task;
   switch (action) {
-    case 'task-edit': openTaskEditor(id); break;
+    case 'task-edit':
+      state.overdueReturn = Boolean(el.closest('.overdue-list'));
+      openTaskEditor(id);
+      break;
     case 'task-save': void saveTaskEditor(); break;
     case 'task-delete': requestTaskDelete(); break;
     case 'task-delete-confirm': {
@@ -578,7 +607,9 @@ function handleFeatureAction(action, el) {
       DB.taskArchive.push({ ...found.task, removedAt: new Date().toISOString() });
       found.list.splice(found.index, 1);
       reconcileProjectWork([found.task.project]);
-      void finishLocal('任务已移除并归档'); break;
+      const reopenOverdue = state.overdueReturn;
+      void finishLocal('任务已移除并归档').then(() => { if (reopenOverdue && overdueTasks().length) openOverdue(); });
+      break;
     }
     case 'task-timer': void toggleTimer(id); break;
     case 'task-filter': openTaskFilter(); break;
@@ -615,6 +646,8 @@ function handleFeatureAction(action, el) {
     case 'record-remove': requestRecordRemove(); break;
     case 'record-remove-confirm': void removeEditorRecord(); break;
     case 'waiting': openWaiting(); break;
+    case 'waiting-remove': requestWaitingRemove(id); break;
+    case 'waiting-remove-confirm': void removeWaitingRecord(); break;
     case 'overdue': openOverdue(); break;
     case 'overdue-plan': {
       const located = taskLocation(id);
@@ -625,7 +658,9 @@ function handleFeatureAction(action, el) {
       located.task.deadlineDate = DB.meta.today;
       addConfirmedTask(located.task, DB.meta.today,
         ['P0', 'P1'].includes(located.task.priority) ? 'must' : located.task.priority === 'P4' ? 'could' : 'should');
-      void finishLocal('已安排到今日'); break;
+      const remaining = overdueTasks().length;
+      void finishLocal('已安排到今日').then(() => { if (remaining) openOverdue(); });
+      break;
     }
     case 'notifications': openNotifications(); break;
     case 'project-board': state.projectBoard = !state.projectBoard; render(); break;
@@ -639,6 +674,8 @@ function handleFeatureAction(action, el) {
     case 'chat-attachment': openTextImport('chat'); break;
     case 'document-import': void importTextDocument().catch(error => showToast(error.message || '文件读取失败')); break;
     case 'document-open': openDocument(id); break;
+    case 'document-remove': requestDocumentRemove(id); break;
+    case 'document-remove-confirm': void removeDocumentRecord(); break;
     case 'document-chat-details': openDocumentChatDetails(id); break;
     case 'document-library': openDocumentLibrary(); break;
     case 'document-save': void saveDocumentEditor().catch(error => showToast(error.message || '文档保存失败')); break;

@@ -8,6 +8,7 @@ function closeModal() {
   state.polishRequestId += 1;
   state.polishLoading = false;
   state.projectStakeholderDraft = null;
+  state.overdueReturn = false;
   const root = document.getElementById('modal-root');
   if (root) root.innerHTML = '';
 }
