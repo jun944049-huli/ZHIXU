@@ -14,7 +14,7 @@ foreach ($entry in $credentialLines) {
 if (!$credentials['password']) { throw 'GitHub credential unavailable' }
 # Pass authentication through stdin, never process arguments or disk.
 $curlConfiguration = 'header = "Authorization: Bearer ' + $credentials['password'] + '"'
-$apiRoot = 'https://api.github.com/repos/jun944049-huli/HULIKU/releases'
+$apiRoot = 'https://api.github.com/repos/jun944049-huli/ZHIXU/releases'
 $statePath = Join-Path 'release' "release-state-$Version.json"
 $assetNames = @("Zhixu-$Version-Windows-Setup.exe", "Zhixu-$Version-source.zip", "SHA256SUMS-$Version.txt")
 if ([version]$Version -ge [version]'0.2.9') {
