@@ -177,7 +177,7 @@ try {
       await configureUpdateTransport(updater);
       updater.autoDownload = false; updater.autoInstallOnAppQuit = false;
       updater.disableDifferentialDownload = true; updater.disableWebInstaller = true;
-      updater.setFeedURL({ provider: 'github', owner: 'jun944049-huli', repo: 'HULIKU', private: true, token });
+      updater.setFeedURL({ provider: 'github', owner: 'jun944049-huli', repo: 'ZHIXU', private: true, token });
       const observed = [];
       updater.on('error', () => observed.push('error'));
       updater.on('update-available', () => observed.push('available'));

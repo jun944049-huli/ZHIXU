@@ -45,7 +45,7 @@
 
 ## 下载与安装
 
-前往 [GitHub Releases](https://github.com/jun944049-huli/ZHIXU/releases/latest) 下载 `Zhixu-0.2.11-Windows-Setup.exe`，安装后从桌面“知序”快捷方式打开。无需安装 Node.js 或 Python。
+前往 [GitHub Releases](https://github.com/jun944049-huli/ZHIXU/releases/latest) 下载 `Zhixu-0.2.12-Windows-Setup.exe`，安装后从桌面“知序”快捷方式打开。无需安装 Node.js 或 Python。
 
 升级沿用原安装位置、快捷方式和 `%APPDATA%\Xiaoyu\` 工作数据。0.2.9 及更高版本可在“设置 → 通用 → 软件更新”中检查并安装新版本。
 
@@ -96,4 +96,4 @@ docs/           使用手册与版本说明
 
 ## 当前状态
 
-当前版本 **0.2.11**。尚未包含：模型联网搜索与工具自动执行、扫描件 OCR、旧版 XLS / PPT 解析、云端账号、离线合并同步和固定公网地址托管。网页访问复用桌面数据，不是独立云服务；终端、插件和任意本机目录仍在桌面端使用。
+当前版本 **0.2.12**。尚未包含：模型联网搜索与工具自动执行、扫描件 OCR、旧版 XLS / PPT 解析、云端账号、离线合并同步和固定公网地址托管。网页访问复用桌面数据，不是独立云服务；终端、插件和任意本机目录仍在桌面端使用。

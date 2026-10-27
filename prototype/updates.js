@@ -43,7 +43,7 @@ async function openDesktopUpdates() {
     <progress id="update-progress" max="100" value="0" hidden></progress>
     <p id="update-checked-at" class="small muted"></p>
     <details class="mt-16"><summary>私有仓库访问</summary>
-      <p class="small muted">使用有权访问 HULIKU 的 GitHub 账号。其他电脑可填写仅授权此仓库 Contents 只读权限的令牌；凭据仅加密保存在本机。</p>
+      <p class="small muted">使用有权访问 ZHIXU 的 GitHub 账号。其他电脑可填写仅授权此仓库 Contents 只读权限的令牌；凭据仅加密保存在本机。</p>
       <div class="field"><label for="update-token">GitHub 更新凭据</label>
         <input class="input" id="update-token" type="password" autocomplete="off" maxlength="4096" placeholder="留空沿用已有凭据"></div>
       <p id="update-access" class="small muted"></p>

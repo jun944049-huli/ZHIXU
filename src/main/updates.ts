@@ -5,7 +5,7 @@ import { dirname } from 'node:path';
 import { z } from 'zod';
 import type { UpdateStatus } from '../shared/updates';
 
-export const UPDATE_REPOSITORY = { provider: 'github' as const, owner: 'jun944049-huli', repo: 'HULIKU', private: true };
+export const UPDATE_REPOSITORY = { provider: 'github' as const, owner: 'jun944049-huli', repo: 'ZHIXU', private: true };
 export interface UpdateEngine extends EventEmitter {
   checkForUpdates(): Promise<unknown>;
   downloadUpdate(): Promise<unknown>;
@@ -47,7 +47,7 @@ export function updateError(error: unknown): string {
     return '此版本缺少更新文件，请等待完整发布后重试，或从 GitHub 下载完整安装包覆盖安装。';
   }
   if (/401|403|404|Bad credentials|Resource not accessible/i.test(text)) {
-    return '无法读取私有仓库。请检查 GitHub 登录或更新凭据：需具有 HULIKU 仓库的 Contents 只读权限；网络异常也可能导致检查失败。';
+    return '无法读取私有仓库。请检查 GitHub 登录或更新凭据：需具有 ZHIXU 仓库的 Contents 只读权限；网络异常也可能导致检查失败。';
   }
   if (/sha512|checksum|digest|signature|ERR_UPDATER_INVALID_SIGNATURE/i.test(text)) {
     return '更新文件校验失败，已停止安装。请检查网络后重新下载。';
@@ -146,7 +146,7 @@ export class Updates {
       const token = saved || await this.deps.credential();
       this.set({ access: saved ? 'saved' : token ? 'git' : 'none' });
       if (!token) {
-        this.set({ stage: 'error', message: '更新源为私有 GitHub 仓库。请先在本机 Git 登录有权限的账号，或填写仅授权 HULIKU 的更新凭据。' });
+        this.set({ stage: 'error', message: '更新源为私有 GitHub 仓库。请先在本机 Git 登录有权限的账号，或填写仅授权 ZHIXU 的更新凭据。' });
         return this.status();
       }
       this.engine?.removeAllListeners();
