@@ -394,16 +394,13 @@ function handleInput(e) {
     const name = e.target.value.trim() || '未命名';
     const preview = document.getElementById('profile-preview-name');
     if (preview) preview.textContent = name;
+    refreshProfileAvatar();
   }
 
   if (e.target.id === 'profile-role') {
     const role = e.target.value.trim() || '未设置角色';
     const preview = document.getElementById('profile-preview-role');
     if (preview) preview.textContent = role;
-  }
-
-  if (e.target.id === 'profile-initials') {
-    refreshProfileAvatar();
   }
 
   if (e.target.id === 'polish-original') {
@@ -562,11 +559,12 @@ function loadLocalOverrides() {
         });
       });
     }
+    DB.user.initials = deriveInitials(DB.user.name);
     const settings = JSON.parse(storageGet('jw-settings') || 'null');
     if (settings && typeof settings === 'object') {
       DB.settings = Object.assign({}, DB.settings, settings);
-      DB.settings.assistantName = String(DB.settings.assistantName || '').trim().slice(0, 12) || '知序';
     }
+    DB.settings.assistantName = '知序';
     const workflow = JSON.parse(storageGet('jw-workflow') || 'null');
     if (workflow && workflow.text) Object.assign(DB.workflow, workflow);
     const projectNotes = JSON.parse(storageGet('jw-project-notes') || 'null');

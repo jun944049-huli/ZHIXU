@@ -9,7 +9,7 @@ const DB = {
 
   user: {
     name: '李维',
-    initials: 'LW',
+    initials: '李',
     role: '项目负责人',
     workspace: '李维的工作台',
     color: '#2F5BE3'

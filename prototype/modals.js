@@ -34,7 +34,7 @@ function deriveInitials(name) {
   if (/^[A-Za-z]/.test(s)) {
     return s.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
   }
-  return s.slice(0, 2);
+  return s.slice(0, 1);
 }
 
 function projectStakeholderRows() {
@@ -159,7 +159,7 @@ function openProfileSettings(tab = 'general') {
   const custom = (DB.settings && DB.settings.customProvider) || {};
   const activeProvider = (DB.settings && DB.settings.aiProvider) || (deepseekKey() ? 'deepseek' : 'local');
   const detected = custom.detected || detectAIProvider(custom.baseUrl, custom.model);
-  state.profileDraft = { color: u.color, avatarImage: u.avatarImage || '', assistantName: assistantName(), customProviderActive: activeProvider === 'custom' };
+  state.profileDraft = { color: u.color, avatarImage: u.avatarImage || '', customProviderActive: activeProvider === 'custom' };
   state.customProviderTested = false;
   state.customProviderFingerprint = '';
   state.customProviderModels = custom.model ? [custom.model] : [];
@@ -207,13 +207,9 @@ function openProfileSettings(tab = 'general') {
             ${window.xiaoyuDesktop?.remoteAccess ? `<div class="field full">
               <button class="btn" data-action="remote-settings">${icon('link', 14)} 网页访问</button>
             </div>` : ''}
-            <div class="field">
+            <div class="field full">
               <label>姓名</label>
               <input class="input" id="profile-name" value="${esc(u.name)}" maxlength="20">
-            </div>
-            <div class="field">
-              <label>头像缩写</label>
-              <input class="input" id="profile-initials" value="${esc(u.initials)}" maxlength="2">
             </div>
 
             <div class="field full">
@@ -237,10 +233,6 @@ function openProfileSettings(tab = 'general') {
               </div>
             </div>
 
-            <div class="field full settings-field">
-              <label>${icon('sparkles', 11)} 助手名称</label>
-              <input class="input" id="profile-assistant-name" value="${esc(assistantName())}" maxlength="12" placeholder="知序">
-            </div>
           </div>
           </section>
           <section class="settings-pane" id="settings-models" role="tabpanel" aria-labelledby="settings-tab-models" data-settings-pane="models">
@@ -343,8 +335,7 @@ function refreshProfileAvatar() {
   if (av) {
     av.style.background = state.profileDraft.color;
     av.innerHTML = profileAvatarContent({ ...state.profileDraft,
-      initials: document.getElementById('profile-initials')?.value.trim() ||
-        deriveInitials(document.getElementById('profile-name')?.value || DB.user.name) });
+      initials: deriveInitials(document.getElementById('profile-name')?.value || DB.user.name) });
   }
   const remove = document.querySelector('[data-action="profile-photo-remove"]');
   if (remove) remove.hidden = !state.profileDraft.avatarImage;
@@ -405,22 +396,19 @@ async function saveProfile() {
   if (state.profileDraft.photoBusy) return;
   const nameEl = document.getElementById('profile-name');
   const roleEl = document.getElementById('profile-role');
-  const iniEl = document.getElementById('profile-initials');
-  const assistantEl = document.getElementById('profile-assistant-name');
   const deepseekEl = document.getElementById('profile-deepseek-key');
   const customNameEl = document.getElementById('custom-provider-name');
   const customModelEl = document.getElementById('custom-provider-model');
   const customBaseEl = document.getElementById('custom-provider-base');
   const customKeyEl = document.getElementById('custom-provider-key');
-  if (!nameEl || !roleEl || !iniEl) return;
+  if (!nameEl || !roleEl) return;
 
   const oldName = DB.user.name;
   const name = nameEl.value.trim() || oldName;
   const role = roleEl.value.trim() || '项目负责人';
   const workspace = name + '的工作台';
-  const initials = (iniEl.value.trim() || deriveInitials(name)).slice(0, 2);
+  const initials = deriveInitials(name);
   const color = state.profileDraft.color || DB.user.color;
-  const assistant = ((assistantEl && assistantEl.value.trim()) || '知序').slice(0, 12);
   const deepseek = deepseekEl ? deepseekEl.value.trim() : String((DB.settings && DB.settings.deepseekKey) || '');
   const customName = customNameEl ? customNameEl.value.trim() : '';
   let customModel = customModelEl ? customModelEl.value.trim() : '';
@@ -449,7 +437,6 @@ async function saveProfile() {
   DB.user.color = color;
   DB.user.avatarImage = state.profileDraft.avatarImage || '';
   DB.settings = DB.settings || {};
-  DB.settings.assistantName = assistant;
   DB.settings.deepseekKey = deepseek;
 
   if (customHasAny) {
@@ -483,7 +470,7 @@ async function saveProfile() {
     });
   });
 
-  try { storageSet('jw-profile', JSON.stringify({ name, role, initials, color, avatarImage: DB.user.avatarImage })); } catch (e) { /* ignore */ }
+  try { storageSet('jw-profile', JSON.stringify({ name, role, color, avatarImage: DB.user.avatarImage })); } catch (e) { /* ignore */ }
   saveSettings();
   closeModal();
   render();

@@ -28,6 +28,16 @@ try {
   assert.equal(await page.locator('.sidebar .user-chip').count(), 0);
   const originalColor = await page.evaluate(() => DB.user.color);
   await page.locator('.workspace-switch').click();
+  assert.equal(await page.locator('#profile-initials').count(), 0);
+  assert.equal(await page.locator('#profile-assistant-name').count(), 0);
+  assert.equal(await page.evaluate(() => assistantName()), '知序');
+  const originalName = await page.evaluate(() => DB.user.name);
+  const originalInitials = await page.evaluate(() => deriveInitials(DB.user.name));
+  assert.equal((await page.locator('#profile-avatar').innerText()).trim(), originalInitials);
+  await page.locator('#profile-name').fill('测试用户');
+  assert.equal((await page.locator('#profile-avatar').innerText()).trim(), '测');
+  await page.locator('#profile-name').fill(originalName);
+  assert.equal((await page.locator('#profile-avatar').innerText()).trim(), originalInitials);
   await page.locator('[data-action="avatar-color"][data-color="#1F8A70"]').click();
   await page.locator('[data-action="save-profile"]').click();
   assert.equal(await page.locator('.workspace-avatar').evaluate(el => el.style.background), 'rgb(31, 138, 112)');
