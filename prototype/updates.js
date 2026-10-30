@@ -21,7 +21,7 @@ function paintDesktopUpdate(status) {
   document.getElementById('update-checked-at').textContent = status.checkedAt ?
     `上次检查 ${new Date(status.checkedAt).toLocaleString()}` : '尚未检查';
   document.getElementById('update-access').textContent = status.access === 'git' ? '已使用本机 GitHub 登录' :
-    status.hasToken ? '已保存更新凭据' : '优先使用本机 GitHub 登录';
+    status.hasToken ? '已保存 GitHub 令牌' : '使用公开仓库，无需登录';
   const progress = document.getElementById('update-progress');
   progress.hidden = status.stage !== 'downloading';
   progress.value = status.percent;
@@ -42,10 +42,10 @@ async function openDesktopUpdates() {
     <p id="update-status" class="remote-feedback" role="status" aria-live="polite"></p>
     <progress id="update-progress" max="100" value="0" hidden></progress>
     <p id="update-checked-at" class="small muted"></p>
-    <details class="mt-16"><summary>私有仓库访问</summary>
-      <p class="small muted">使用有权访问 ZHIXU 的 GitHub 账号。其他电脑可填写仅授权此仓库 Contents 只读权限的令牌；凭据仅加密保存在本机。</p>
-      <div class="field"><label for="update-token">GitHub 更新凭据</label>
-        <input class="input" id="update-token" type="password" autocomplete="off" maxlength="4096" placeholder="留空沿用已有凭据"></div>
+    <details class="mt-16"><summary>GitHub 令牌（可选）</summary>
+      <p class="small muted">更新源为公开仓库，通常无需登录即可检查。网络受限或遇到 GitHub 访问频率限制时，可填写仅授权 ZHIXU 仓库 Contents 只读权限的令牌；凭据仅加密保存在本机。</p>
+      <div class="field"><label for="update-token">GitHub 令牌</label>
+        <input class="input" id="update-token" type="password" autocomplete="off" maxlength="4096" placeholder="留空则匿名检查或沿用已有令牌"></div>
       <p id="update-access" class="small muted"></p>
       <button class="btn btn-sm" data-action="update-clear">移除保存的凭据</button>
     </details>`,

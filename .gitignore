@@ -1,6 +1,7 @@
 node_modules/
 out/
 release/
+outputs/
 .desktop-test/
 desktop-public/
 .plugin-runtime/

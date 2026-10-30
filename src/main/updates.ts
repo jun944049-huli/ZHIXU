@@ -1,11 +1,14 @@
 import { EventEmitter } from 'node:events';
-import { execFile } from 'node:child_process';
 import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { z } from 'zod';
 import type { UpdateStatus } from '../shared/updates';
 
-export const UPDATE_REPOSITORY = { provider: 'github' as const, owner: 'jun944049-huli', repo: 'ZHIXU', private: true };
+export const UPDATE_REPOSITORY = { provider: 'github' as const, owner: 'jun944049-huli', repo: 'ZHIXU' };
+// electron-updater picks the private provider for any non-null token, including an empty string.
+export function updateFeedConfig(token: string): { provider: 'github'; owner: string; repo: string; token?: string } {
+  return token ? { ...UPDATE_REPOSITORY, token } : { ...UPDATE_REPOSITORY };
+}
 export interface UpdateEngine extends EventEmitter {
   checkForUpdates(): Promise<unknown>;
   downloadUpdate(): Promise<unknown>;
@@ -17,24 +20,9 @@ interface Dependencies {
   packaged: boolean;
   encrypt(value: string): string;
   decrypt(value: string): string;
-  credential(): Promise<string>;
   engine(token: string): UpdateEngine | Promise<UpdateEngine>;
   prepare(): Promise<void>;
   notify(status: UpdateStatus): void;
-}
-
-// Read an existing login without opening a Git credential prompt or writing credentials.
-export function githubCredential(): Promise<string> {
-  return new Promise(resolve => {
-    const child = execFile('git', ['-c', 'credential.interactive=never', 'credential', 'fill'], {
-      windowsHide: true, timeout: 10000, maxBuffer: 64 * 1024,
-      env: { ...process.env, GCM_INTERACTIVE: 'never', GIT_TERMINAL_PROMPT: '0' }
-    }, (error, stdout) => {
-      if (error) { resolve(''); return; }
-      resolve(stdout.split(/\r?\n/).find(line => line.startsWith('password='))?.slice(9).trim() || '');
-    });
-    child.stdin?.end('protocol=https\nhost=github.com\nusername=jun944049-huli\n\n');
-  });
 }
 
 export function updateError(error: unknown): string {
@@ -46,8 +34,8 @@ export function updateError(error: unknown): string {
   if (/CHANNEL_FILE_NOT_FOUND|latest\.yml|ASSET_NOT_FOUND/i.test(text)) {
     return '此版本缺少更新文件，请等待完整发布后重试，或从 GitHub 下载完整安装包覆盖安装。';
   }
-  if (/401|403|404|Bad credentials|Resource not accessible/i.test(text)) {
-    return '无法读取私有仓库。请检查 GitHub 登录或更新凭据：需具有 ZHIXU 仓库的 Contents 只读权限；网络异常也可能导致检查失败。';
+  if (/401|403|404|Bad credentials|Resource not accessible|rate limit/i.test(text)) {
+    return '无法访问 GitHub 更新源。请检查网络或代理后重试；如遇访问频率限制，可填写仅授权 ZHIXU 仓库 Contents 只读权限的令牌。';
   }
   if (/sha512|checksum|digest|signature|ERR_UPDATER_INVALID_SIGNATURE/i.test(text)) {
     return '更新文件校验失败，已停止安装。请检查网络后重新下载。';
@@ -140,15 +128,12 @@ export class Updates {
       let saved = '';
       try { saved = this.config.token ? this.deps.decrypt(this.config.token) : ''; }
       catch {
-        this.set({ stage: 'error', message: '无法解密本机更新凭据，请在“私有仓库访问”中重新保存或移除凭据。' });
+        this.set({ stage: 'error', message: '无法解密本机更新凭据，请在“GitHub 令牌”中重新保存或移除凭据。' });
         return this.status();
       }
-      const token = saved || await this.deps.credential();
-      this.set({ access: saved ? 'saved' : token ? 'git' : 'none' });
-      if (!token) {
-        this.set({ stage: 'error', message: '更新源为私有 GitHub 仓库。请先在本机 Git 登录有权限的账号，或填写仅授权 ZHIXU 的更新凭据。' });
-        return this.status();
-      }
+      // Public releases must not depend on the developer's Git login.
+      const token = saved;
+      this.set({ access: saved ? 'saved' : 'none' });
       this.engine?.removeAllListeners();
       const engine = await this.deps.engine(token);
       this.engine = engine;

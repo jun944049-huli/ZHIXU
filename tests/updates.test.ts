@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Updates, UpdatePreparationError, updateError } from '../src/main/updates';
+import { Updates, UpdatePreparationError, updateError, updateFeedConfig } from '../src/main/updates';
 
 class Engine extends EventEmitter {
   checks = 0; downloads = 0; installs = 0;
@@ -46,7 +46,8 @@ test('new versions download in the background but require an explicit install', 
   const f = fixture();
   const result = await f.updates.handle({ operation: 'check' });
   assert.equal(result.stage, 'ready');
-  assert.equal(result.version, '0.3.0'); assert.equal(result.access, 'git');
+  assert.equal(result.version, '0.3.0'); assert.equal(result.access, 'none');
+  assert.equal(f.credentials(), 0);
   assert.equal(f.engine.downloads, 1); assert.equal(f.engine.installs, 0);
   assert.ok(f.states.includes('downloading'));
   await f.updates.handle({ operation: 'check' });
@@ -71,11 +72,45 @@ test('checksum failure never permits installation; retry downloads again', async
   f.engine.downloadError = '';
   assert.equal((await f.updates.handle({ operation: 'check' })).stage, 'ready');
 });
-test('no local Git credential gives a useful private repository explanation', async () => {
+test('missing local credential still checks the public release anonymously', async () => {
   const f = fixture({ credential: async () => '' });
+  let used: string | null = null;
+  f.deps.engine = (token: string) => { used = token; return f.engine; };
   const result = await f.updates.handle({ operation: 'check' });
-  assert.equal(result.stage, 'error'); assert.match(result.message, /私有 GitHub/);
-  assert.equal(f.engine.checks, 0);
+  assert.equal(result.access, 'none');
+  assert.equal(used, '');
+  assert.equal(f.engine.checks, 1);
+  assert.equal(f.engine.downloads, 1);
+});
+test('anonymous checks never send an empty token to the private provider', () => {
+  const anonymous = updateFeedConfig('');
+  assert.equal('token' in anonymous, false);
+  assert.equal(anonymous.repo, 'ZHIXU');
+  assert.equal(updateFeedConfig('abc').token, 'abc');
+});
+test('background scheduler discovers and downloads updates without a Git login', async context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const f = fixture({ credential: async () => { throw new Error('Git must not be required'); } });
+  try {
+    f.updates.start();
+    context.mock.timers.tick(15000);
+    for (let step = 0; step < 20; step++) await Promise.resolve();
+    assert.equal(f.updates.status().stage, 'ready');
+    assert.equal(f.engine.checks, 1);
+    assert.equal(f.engine.downloads, 1);
+    assert.equal(f.engine.installs, 0);
+  } finally { f.updates.dispose(); context.mock.timers.reset(); }
+});
+test('disabled background checks stay idle while manual checks remain available', async context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const f = fixture();
+  try {
+    await f.updates.handle({ operation: 'configure', automatic: false });
+    f.updates.start();
+    context.mock.timers.tick(6 * 60 * 60 * 1000);
+    assert.equal(f.engine.checks, 0);
+    assert.equal((await f.updates.handle({ operation: 'check' })).stage, 'ready');
+  } finally { f.updates.dispose(); context.mock.timers.reset(); }
 });
 test('saved credentials remain encrypted and are never returned in status or errors', async () => {
   const secret = 'github-test-sensitive-credential';
@@ -110,12 +145,17 @@ test('credentials from an unavailable Windows identity cannot trigger an update 
   assert.equal(f.engine.checks, 0);
 });
 test('concurrent checks and edits cannot replace an active download', async () => {
-  let resolve!: (token: string) => void;
-  const f = fixture({ credential: () => new Promise<string>(done => { resolve = done; }) });
+  let resolve!: () => void;
+  const f = fixture();
+  f.engine.checkForUpdates = async () => {
+    f.engine.checks++;
+    await new Promise<void>(done => { resolve = done; });
+    f.engine.emit('update-available', { version: '0.3.0' });
+  };
   const pending = f.updates.handle({ operation: 'check' });
   assert.equal((await f.updates.handle({ operation: 'check' })).stage, 'checking');
   await assert.rejects(f.updates.handle({ operation: 'configure', automatic: false }), /正在进行/);
-  resolve('test-token'); await pending;
+  resolve(); await pending;
   assert.equal(f.engine.checks, 1);
 });
 test('development preview cannot download or run an installer', async () => {

@@ -19,7 +19,7 @@ import { SharedWorkbench } from './remote-state';
 import { RemoteAccess } from './remote-access';
 import updater from 'electron-updater';
 import { dirname } from 'node:path';
-import { Updates, UpdatePreparationError, githubCredential, UPDATE_REPOSITORY } from './updates';
+import { Updates, UpdatePreparationError, updateFeedConfig } from './updates';
 import { configureUpdateTransport } from './update-http';
 
 let store: WorkbenchStore;
@@ -252,11 +252,10 @@ else {
         return safeStorage.encryptString(value).toString('base64');
       },
       decrypt: value => safeStorage.decryptString(Buffer.from(value, 'base64')),
-      credential: githubCredential,
       async engine(token) {
         const engine = new updater.NsisUpdater();
         await configureUpdateTransport(engine);
-        engine.setFeedURL({ ...UPDATE_REPOSITORY, token });
+        engine.setFeedURL(updateFeedConfig(token));
         engine.logger = null;
         engine.autoDownload = false;
         engine.autoInstallOnAppQuit = false;

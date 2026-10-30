@@ -146,21 +146,12 @@ try {
   console.log('Real updater verified valid bytes, corrupt checksums, stalled downloads and retry without installing');
 
   if (process.env.XIAOYU_TEST_UPDATES_LIVE === '1') {
-    console.log('Verifying the published private release and a real SHA-512 checked download...');
+    console.log('Verifying the public release anonymously and a real SHA-512 checked download...');
     const result = await application.evaluate(async ({ app }, { root, profile }) => {
       const require = process.getBuiltinModule('node:module').createRequire(root + '/package.json');
-      const { execFile } = require('node:child_process');
       const { writeFileSync, readFileSync } = require('node:fs');
       const { join } = require('node:path');
       const { createHash } = require('node:crypto');
-      const token = await new Promise(resolve => {
-        const child = execFile('git', ['-c', 'credential.interactive=never', 'credential', 'fill'], {
-          windowsHide: true, timeout: 10000,
-          env: { ...process.env, GCM_INTERACTIVE: 'never', GIT_TERMINAL_PROMPT: '0' }
-        }, (error, stdout) => resolve(error ? '' : stdout.split(/\r?\n/).find(line => line.startsWith('password='))?.slice(9).trim()));
-        child.stdin.end('protocol=https\nhost=github.com\nusername=jun944049-huli\n\n');
-      });
-      if (!token) throw new Error('Private release verification requires an existing authorized Git login');
       const { NsisUpdater } = require('electron-updater');
       const { configureUpdateTransport } = require(root + '/out/main/update-http.js');
       const { CancellationToken } = require('builder-util-runtime');
@@ -177,7 +168,7 @@ try {
       await configureUpdateTransport(updater);
       updater.autoDownload = false; updater.autoInstallOnAppQuit = false;
       updater.disableDifferentialDownload = true; updater.disableWebInstaller = true;
-      updater.setFeedURL({ provider: 'github', owner: 'jun944049-huli', repo: 'ZHIXU', private: true, token });
+      updater.setFeedURL({ provider: 'github', owner: 'jun944049-huli', repo: 'ZHIXU' });
       const observed = [];
       updater.on('error', () => observed.push('error'));
       updater.on('update-available', () => observed.push('available'));
@@ -191,25 +182,28 @@ try {
             const files = await updater.downloadUpdate(cancellation);
             const bytes = readFileSync(files[0]);
             return { version: latest.updateInfo.version, bytes: bytes.length,
+              expectedSha512: latest.updateInfo.files[0].sha512,
+              provider: (await updater.clientPromise).constructor.name,
               sha512: createHash('sha512').update(bytes).digest('base64'), observed };
           })(),
           new Promise((_, reject) => { timer = setTimeout(() => {
             cancellation.cancel(); reject(new Error('Verification timed out'));
           }, 180000); })
         ]);
-      } catch { throw new Error('Private release check/download verification failed'); }
+      } catch (error) { throw new Error('Anonymous public release check/download verification failed: ' + String(error).slice(0, 2000)); }
       finally { clearTimeout(timer); }
     }, { root, profile });
-    const metadata = readFileSync(join(root, 'release/latest.yml'), 'utf8');
-    const expected = metadata.match(/sha512: ([^\r\n]+)/)[1];
-    assert.equal(result.version, version);
-    assert.equal(result.sha512, expected);
+    assert.equal(result.version, process.env.XIAOYU_EXPECT_UPDATE_VERSION || version);
+    assert.equal(result.provider, 'GitHubProvider');
+    assert.equal(result.sha512, result.expectedSha512);
     assert.ok(result.bytes > 100000000);
     assert.deepEqual(result.observed, ['available', 'downloaded']);
-    const status = await page.evaluate(() => window.xiaoyuDesktop.updates({ operation: 'check' }));
-    assert.equal(status.stage, 'idle');
-    assert.match(status.message, /最新版本/);
-    console.log(JSON.stringify({ privateRelease: true, downloadVerified: true, bytes: result.bytes }));
+    if (displayVersion === result.version) {
+      const status = await page.evaluate(() => window.xiaoyuDesktop.updates({ operation: 'check' }));
+      assert.equal(status.stage, 'idle');
+      assert.match(status.message, /最新版本/);
+    }
+    console.log(JSON.stringify({ anonymousRelease: true, version: result.version, downloadVerified: true, bytes: result.bytes }));
   }
   await page.evaluate(() => persistWorkbench());
   assert.deepEqual(errors, []);

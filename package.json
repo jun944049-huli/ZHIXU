@@ -1,6 +1,6 @@
 {
   "name": "xiaoyu-workbench",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "private": true,
   "description": "知序 · 个人工作台",
   "main": "./out/main/index.js",
@@ -87,8 +87,7 @@
     "publish": {
       "provider": "github",
       "owner": "jun944049-huli",
-      "repo": "ZHIXU",
-      "private": true
+      "repo": "ZHIXU"
     },
     "win": {
       "executableName": "Xiaoyu",
